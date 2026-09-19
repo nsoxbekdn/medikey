@@ -210,6 +210,3 @@ MediKey organizes and explains user-provided health information. It does not pro
 
 Real AI provider adapter with per-chunk provenance · IPFS pinning via Pinata/web3.storage · research (de-identified) sharing mode · emergency access card · medical timeline / "what changed" deltas · provider verification service · document relationship graph.
 
-## 3-minute demo
-
-See [`docs/demo-script.md`](docs/demo-script.md).

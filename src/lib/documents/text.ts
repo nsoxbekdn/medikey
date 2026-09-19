@@ -13,6 +13,10 @@ const UNREADABLE_MESSAGE = "We couldn't reliably extract text from this file. Tr
 export async function extractDocumentText(
   file: File,
   onStatus?: (status: ExtractStatus) => void,
+  options?: {
+    ocrSession?: import("./ocr").OcrSession;
+    getOcrSession?: () => Promise<import("./ocr").OcrSession>;
+  },
 ): Promise<string> {
   const name = file.name.toLowerCase();
 
@@ -25,14 +29,16 @@ export async function extractDocumentText(
 
     onStatus?.({ phase: "scanned-detected" });
     const { createOcrSession, isOcrTextUsable } = await import("./ocr");
-    const session = await createOcrSession();
+    const sharedSession = options?.ocrSession ?? await options?.getOcrSession?.();
+    const session = sharedSession ?? await createOcrSession();
+    const ownsSession = !sharedSession;
     let ocrText: string;
     try {
       ocrText = await extractPdfTextViaOcr(file, session, (page, totalPages) =>
         onStatus?.({ phase: "ocr-page", page, totalPages }),
       );
     } finally {
-      await session.terminate();
+      if (ownsSession) await session.terminate();
     }
     if (!isOcrTextUsable(ocrText)) throw new Error(UNREADABLE_MESSAGE);
     return ocrText;
@@ -41,12 +47,14 @@ export async function extractDocumentText(
   if (SUPPORTED_IMAGE_TYPES.includes(file.type) || /\.(jpe?g|png)$/i.test(name)) {
     onStatus?.({ phase: "ocr-image" });
     const { createOcrSession, isOcrTextUsable } = await import("./ocr");
-    const session = await createOcrSession();
+    const sharedSession = options?.ocrSession ?? await options?.getOcrSession?.();
+    const session = sharedSession ?? await createOcrSession();
+    const ownsSession = !sharedSession;
     let ocrText: string;
     try {
       ocrText = await session.recognize(file);
     } finally {
-      await session.terminate();
+      if (ownsSession) await session.terminate();
     }
     if (!isOcrTextUsable(ocrText)) throw new Error(UNREADABLE_MESSAGE);
     return ocrText;
