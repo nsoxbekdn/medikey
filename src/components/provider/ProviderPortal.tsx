@@ -9,9 +9,10 @@ import { CountdownBadge } from "./CountdownBadge";
 import { ProviderShell } from "./ProviderShell";
 import { ProviderSkeleton } from "./ProviderSkeleton";
 import { ProviderStatusScreen } from "./ProviderStatusScreen";
-import { DocumentBody } from "./DocumentBody";
+import { ProviderDocumentPreview } from "./ProviderDocumentPreview";
 import { Check, Clock, FileText, Info, Lock, Shield, Users } from "lucide-react";
 import { VitalsPoint } from "@/lib/db/types";
+import { getDocumentPreviewKind, type DocumentPreviewKind } from "@/lib/provider/documentPreview";
 
 type VitalsChartsComponent = typeof import("@/components/vitals/VitalsCharts").VitalsCharts;
 
@@ -39,7 +40,9 @@ interface DecryptedItem {
   itemId: string;
   kind: AccessItem["kind"];
   meta: Record<string, unknown>;
+  previewKind?: DocumentPreviewKind;
   text?: string;
+  binary?: ArrayBuffer;
   points?: VitalsPoint[];
 }
 
@@ -158,7 +161,23 @@ export function ProviderPortal({ shareId }: { shareId: string }) {
                     points: JSON.parse(bufToUtf8(plainBuf)),
                   };
                 }
-                return { itemId: item.itemId, kind: item.kind, meta: item.meta, text: bufToUtf8(plainBuf) };
+                const previewKind = getDocumentPreviewKind(item.kind, item.meta.mimeType);
+                if (previewKind === "text") {
+                  return {
+                    itemId: item.itemId,
+                    kind: item.kind,
+                    meta: item.meta,
+                    previewKind,
+                    text: bufToUtf8(plainBuf),
+                  };
+                }
+                return {
+                  itemId: item.itemId,
+                  kind: item.kind,
+                  meta: item.meta,
+                  previewKind,
+                  binary: previewKind === "pdf" ? plainBuf : undefined,
+                };
               } catch {
                 // Wrong/corrupted key for this item — skip it rather than crash the whole view.
                 return null;
@@ -282,7 +301,14 @@ export function ProviderPortal({ shareId }: { shareId: string }) {
                           )}
                         </div>
                       </div>
-                      <div className="pt-5">{activeDoc.text && <DocumentBody text={activeDoc.text} />}</div>
+                      <div className="pt-5">
+                        <ProviderDocumentPreview
+                          previewKind={activeDoc.previewKind ?? "unsupported"}
+                          title={itemLabel(activeDoc)}
+                          text={activeDoc.text}
+                          binary={activeDoc.binary}
+                        />
+                      </div>
                     </div>
                   )}
                 </div>
