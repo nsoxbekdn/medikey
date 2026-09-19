@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { v4 as uuidv4 } from "uuid";
 import { Button } from "@/components/ui/button";
@@ -9,8 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { parseVitalsCsv, buildVitalsPoints } from "@/lib/vitals/parse";
 import { VitalField, needsManualMapping } from "@/lib/vitals/normalize";
+import { VitalsPoint } from "@/lib/db/types";
 import { useVault } from "@/lib/vault/VaultProvider";
 import { generateAesKey, aesEncryptBytes } from "@/lib/crypto/aes";
 import { wrapKey } from "@/lib/crypto/key-wrap";
@@ -25,23 +25,70 @@ export function VitalsUploadWizard() {
   const { vault } = useVault();
   const [name, setName] = useState("");
   const [headers, setHeaders] = useState<string[]>([]);
-  const [rows, setRows] = useState<Record<string, string>[]>([]);
+  const [rowCount, setRowCount] = useState(0);
   const [mapping, setMapping] = useState<Partial<Record<VitalField, string>>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [csvBusy, setCsvBusy] = useState(false);
+  const workerRef = useRef<Worker | null>(null);
+  const nextRequestId = useRef(0);
+  const pending = useRef(new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>());
+
+  useEffect(() => {
+    const pendingRequests = pending.current;
+    const worker = new Worker(new URL("../../workers/vitals-csv.worker.ts", import.meta.url), { type: "module" });
+    worker.onmessage = (event: MessageEvent<{ id: number; result?: unknown; error?: string }>) => {
+      const request = pendingRequests.get(event.data.id);
+      if (!request) return;
+      pendingRequests.delete(event.data.id);
+      if (event.data.error) request.reject(new Error(event.data.error));
+      else request.resolve(event.data.result);
+    };
+    worker.onerror = () => {
+      for (const request of pendingRequests.values()) request.reject(new Error("CSV worker failed."));
+      pendingRequests.clear();
+    };
+    workerRef.current = worker;
+    return () => {
+      worker.terminate();
+      workerRef.current = null;
+      for (const request of pendingRequests.values()) request.reject(new Error("CSV processing cancelled."));
+      pendingRequests.clear();
+    };
+  }, []);
+
+  function runCsvWorker<T>(message: Record<string, unknown>, transfer: Transferable[] = []): Promise<T> {
+    const worker = workerRef.current;
+    if (!worker) return Promise.reject(new Error("CSV processor is not ready."));
+    const id = ++nextRequestId.current;
+    return new Promise<T>((resolve, reject) => {
+      pending.current.set(id, { resolve: resolve as (value: unknown) => void, reject });
+      worker.postMessage({ ...message, id }, transfer);
+    });
+  }
 
   async function onFile(f: File) {
     setError(null);
-    const text = await f.text();
-    const parsed = parseVitalsCsv(text);
-    if (parsed.rows.length === 0) {
-      setError("No rows found in this CSV.");
-      return;
+    setCsvBusy(true);
+    try {
+      const csvBuffer = await f.arrayBuffer();
+      const parsed = await runCsvWorker<{
+        headers: string[];
+        rowCount: number;
+        mapping: Partial<Record<VitalField, string>>;
+      }>({ type: "parse", csvBuffer }, [csvBuffer]);
+      if (parsed.rowCount === 0) throw new Error("No rows found in this CSV.");
+      setHeaders(parsed.headers);
+      setRowCount(parsed.rowCount);
+      setMapping(parsed.mapping);
+      if (!name) setName(f.name.replace(/\.csv$/i, ""));
+    } catch (err) {
+      setHeaders([]);
+      setRowCount(0);
+      setError(err instanceof Error ? err.message : "CSV processing failed.");
+    } finally {
+      setCsvBusy(false);
     }
-    setHeaders(parsed.headers);
-    setRows(parsed.rows);
-    setMapping(parsed.mapping);
-    if (!name) setName(f.name.replace(/\.csv$/i, ""));
   }
 
   async function onSave() {
@@ -53,7 +100,7 @@ export function VitalsUploadWizard() {
     setBusy(true);
     setError(null);
     try {
-      const points = buildVitalsPoints(rows, mapping);
+      const { points } = await runCsvWorker<{ points: VitalsPoint[] }>({ type: "normalize", mapping });
       if (points.length === 0) throw new Error("No valid rows after mapping — check date formats.");
 
       const datasetKey = await generateAesKey();
@@ -118,7 +165,8 @@ export function VitalsUploadWizard() {
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="vitals-file">CSV file</Label>
-            <Input id="vitals-file" type="file" accept=".csv" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
+            <Input id="vitals-file" type="file" accept=".csv" disabled={csvBusy} onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
+            {csvBusy && <p className="text-xs text-muted-foreground">Parsing CSV in the background...</p>}
           </div>
           {headers.length > 0 && (
             <div className="space-y-2">
@@ -133,7 +181,7 @@ export function VitalsUploadWizard() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Column mapping</CardTitle>
-            <CardDescription>{rows.length} rows detected. Adjust if auto-mapping looks wrong.</CardDescription>
+            <CardDescription>{rowCount} rows detected. Adjust if auto-mapping looks wrong.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-2">
             {FIELDS.map((field) => (
@@ -163,7 +211,7 @@ export function VitalsUploadWizard() {
 
       {headers.length > 0 && (
         <div className="flex justify-end">
-          <Button onClick={onSave} disabled={busy}>
+          <Button onClick={onSave} disabled={busy || csvBusy}>
             {busy ? "Encrypting..." : "Encrypt & save dataset"}
           </Button>
         </div>

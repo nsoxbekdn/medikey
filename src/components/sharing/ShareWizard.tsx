@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import Link from "next/link";
-import QRCode from "qrcode";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -226,6 +225,9 @@ export function ShareWizard() {
       const { shareId, receiptCode } = await res.json();
 
       const url = buildShareUrl(window.location.origin, shareId, secretB64Url);
+      // QR generation is optional and relatively heavy; load it only after a
+      // share exists and a QR code is actually requested for the result view.
+      const QRCode = (await import("qrcode")).default;
       const qrDataUrl = await QRCode.toDataURL(url, { margin: 1, width: 240 });
       setResult({ shareId, url, qrDataUrl, receiptCode });
       toast.success("Secure share created.");
@@ -415,7 +417,7 @@ export function ShareWizard() {
             </div>
             <div className="flex items-center gap-3">
               <Switch checked={oneTime} onCheckedChange={setOneTime} id="one-time" />
-              <Label htmlFor="one-time">One-time access (consumed after first successful retrieval)</Label>
+              <Label htmlFor="one-time">One-time access (claimed by the first retrieval)</Label>
             </div>
             <div className="flex justify-between">
               <Button variant="ghost" onClick={() => setStep(3)}>

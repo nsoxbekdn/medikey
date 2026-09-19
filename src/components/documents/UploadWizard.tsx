@@ -64,7 +64,9 @@ export function UploadWizard({ onStepChange }: { onStepChange?: (index: number) 
     setStatusMessage(STATUS_MESSAGES.reading);
     try {
       setStatusMessage(STATUS_MESSAGES.extracting);
-      const text = await extractDocumentText(f);
+      const text = await extractDocumentText(f, (page, totalPages) => {
+        setStatusMessage(`Scanning page ${page} of ${totalPages}`);
+      });
       setExtractedText(text);
       setStatusMessage(STATUS_MESSAGES.scanning);
       const found = detectPII(text);

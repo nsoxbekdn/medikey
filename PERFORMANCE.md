@@ -145,9 +145,41 @@ Verified: signed-in dashboard, vault, upload (unlock → PDF → X-Ray → save)
 
 `npm run lint` → 0 errors (4 pre-existing warnings). `npm run typecheck` → clean. `npm test` → 18/18. `npm run build` → clean. Signed-in and signed-out browser checks are recorded above.
 
+### Phase 7 — Provider access (CRITICAL)
+
+- Added `claim_share_access(uuid)` in `0004_provider_access.sql`. One row-locked transaction resolves effective share state, refuses inactive shares, bulk-joins every permitted item and its safe metadata, atomically claims a one-time share, and writes safe access events. Concurrent requests cannot both claim a one-time share.
+- Added `GET /api/shares/:id/access`: one RPC round trip followed by one Storage `createSignedUrls()` batch. URLs expire after **45 seconds**. The route returns keys/IVs and short-lived URLs, but never downloads, buffers, base64-encodes, or JSON-proxies ciphertext.
+- `ProviderPortal.tsx` now makes one access request, downloads every ciphertext directly from the private Supabase bucket in parallel, and decrypts locally with the unchanged fragment secret. The fragment is still removed from browser history after import and is never sent to the server.
+- Removed the obsolete `/payload` and `/consume` routes so there is no fallback path that proxies large ciphertext or bypasses atomic one-time claiming. `/status` remains metadata-only for compatibility and cannot mint Storage URLs.
+- Inactive shares return no item metadata from the RPC and never reach signed-URL creation. The bucket remains private; the long-lived share URL remains the MediKey application URL plus fragment secret.
+
+**Validation status:** lint/typecheck/tests/production build are clean locally. Live latency and decryption measurement is intentionally **not claimed yet**: the migration still has to be run against the hosted Supabase project, and the available dashboard session is signed out. This is the only live validation blocker.
+
+### Phase 9 — Large CSV import
+
+- Added a dedicated `vitals-csv.worker.ts`. The 2 MB CSV `ArrayBuffer` is transferred (not copied as a string) to the worker; Papa Parse rows stay cached in worker memory and never enter React state.
+- The UI retains only headers, row count, and mapping. On save, the selected mapping is sent to the same worker and only the final normalized points cross back once.
+- `buildVitalsPoints()` now parses each timestamp once to numeric epoch, sorts on that number, and emits ISO timestamps afterward; it no longer constructs two `Date` objects per comparator call.
+
+**Measured** in the browser with `vitals_50000.csv`: parse **51 ms**, normalize/sort/transfer **76 ms**, **126 ms total**; a 16 ms UI timer continued to fire (7 ticks, largest interval **17 ms**). Baseline was **650–720 ms blocking** on the main thread with 50,000 raw rows placed in React state.
+
+### Phase 10 — PDF extraction
+
+- PDF.js remains lazy-loaded and continues to do all extraction locally.
+- Pages now extract with bounded concurrency of 6 (not unbounded `Promise.all`) while result ordering remains page-correct.
+- The upload UI receives page-based progress (`Scanning page 47 of 120`) and PDF worker resources are explicitly destroyed afterward. Full-document PII detection still runs over the complete joined text.
+
+**Measured** in the browser with `long_120p.pdf`: **3.6 s → 283 ms**, 485,288 extracted characters, final progress `Scanning page 120 of 120`.
+
+### Phase 11 — Bundle audit
+
+- QR generation changed from a static import to an on-demand `import("qrcode")` after share creation. The production QR implementation is now a separate 23.8 KB raw / 8.9 KB gzip chunk.
+- Provider charts use a direct dynamic import only after a decrypted vitals item is present. The Recharts chunk (367 KB raw / 105 KB gzip) is absent from the document-only provider route's initial manifest and loads only for vitals.
+- Production `/share/[id]` initial JavaScript measured **650 KB raw / 205 KB gzip** across 10 chunks, down from the earlier ~993 KB raw route total that included Recharts.
+- PDF.js remains an on-demand upload-path import. AI code is server-only under `/api/ai/query`; the IPFS adapter has no runtime import. Neither is present in ordinary client route manifests.
+- Reviewed client boundaries: the remaining broad boundary is the interactive authenticated shell/vault context. Splitting it would be a risky architectural rewrite for a small incremental saving, so it was deliberately left intact per the audit constraint.
+
 ## 4. Remaining work (not yet done in this pass)
 
-- **Phase 7** (provider access: merge status+payload into one call, bulk item query, short-lived signed Storage URLs instead of base64-in-JSON) — the other CRITICAL item, not yet implemented.
-- **Phase 9/10** (CSV Papa worker mode, bounded-concurrency PDF page extraction with progress) — deferred; measured cost (720ms for 50k rows, 3.6s for 120 pages) is real but lower priority than Phases 3/7 per the audit's impact ranking, and 3.6s is off the main thread already (pdf.js worker).
-- **Phase 11** (bundle audit after workflow fixes) — not started.
+- Apply `0004_provider_access.sql` to the hosted project, then measure the live provider flow and re-run the document + selective-vitals security regression. The dashboard requires the owner to sign in first; no live improvement is claimed until this is complete.
 - **Region note**: Supabase project is ap-southeast-2; measured 350-600ms per round trip from this environment. This is the single largest lever and is explicitly the owner's infrastructure decision, not something changed here.

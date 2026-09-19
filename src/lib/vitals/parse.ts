@@ -20,16 +20,18 @@ export function buildVitalsPoints(
   rows: Record<string, string>[],
   mapping: Partial<Record<VitalField, string>>
 ): VitalsPoint[] {
-  const points: VitalsPoint[] = [];
+  // Parse each timestamp exactly once. Keeping the numeric epoch beside the
+  // normalized point avoids constructing two Dates for every sort comparison.
+  const points: Array<{ epoch: number; point: VitalsPoint }> = [];
   for (const row of rows) {
     const tsCol = mapping.timestamp;
     if (!tsCol) continue;
     const rawTs = row[tsCol];
     if (!rawTs) continue;
-    const date = new Date(rawTs);
-    if (Number.isNaN(date.getTime())) continue; // skip invalid rows gracefully
+    const epoch = Date.parse(rawTs);
+    if (Number.isNaN(epoch)) continue; // skip invalid rows gracefully
 
-    const point: VitalsPoint = { timestamp: date.toISOString() };
+    const point: VitalsPoint = { timestamp: new Date(epoch).toISOString() };
     for (const field of NUMERIC_FIELDS) {
       const col = mapping[field];
       if (!col) continue;
@@ -38,7 +40,8 @@ export function buildVitalsPoints(
       const num = Number(raw);
       if (!Number.isNaN(num)) point[field] = num;
     }
-    points.push(point);
+    points.push({ epoch, point });
   }
-  return points.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  points.sort((a, b) => a.epoch - b.epoch);
+  return points.map(({ point }) => point);
 }

@@ -2,10 +2,10 @@ export async function extractPlainText(file: File): Promise<string> {
   return file.text();
 }
 
-export async function extractDocumentText(file: File): Promise<string> {
+export async function extractDocumentText(file: File, onPdfProgress?: (page: number, totalPages: number) => void): Promise<string> {
   if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
     const { extractPdfText } = await import("./pdf");
-    return extractPdfText(file);
+    return extractPdfText(file, onPdfProgress);
   }
   return extractPlainText(file);
 }
