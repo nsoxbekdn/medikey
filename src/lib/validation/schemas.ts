@@ -1,36 +1,48 @@
 import { z } from "zod";
 
-export const shareItemSchema = z.object({
-  documentId: z.string().uuid().optional(),
-  sanitizedArtifactId: z.string().uuid().optional(),
-  vitalsDatasetId: z.string().uuid().optional(),
-  selectedMetrics: z.array(z.string()).optional(),
-  wrappedAccessKey: z.string().min(1),
-  wrappingIv: z.string().min(1),
-  encryptedStoragePath: z.string().min(1).optional(),
-  encryptionIv: z.string().min(1).optional(),
-});
+const allowedVitalsMetrics = ["systolic", "diastolic", "heartRate", "glucose", "spo2", "weight"] as const;
 
-export const createShareSchema = z.object({
-  providerLabel: z.string().min(1).max(200),
-  providerType: z.string().min(1).max(100),
-  purpose: z.string().min(1).max(200),
-  expiresAt: z.string().datetime(),
-  oneTime: z.boolean().default(false),
-  items: z.array(shareItemSchema).min(1),
-});
+export const shareItemSchema = z
+  .object({
+    documentId: z.string().uuid().optional(),
+    sanitizedArtifactId: z.string().uuid().optional(),
+    vitalsDatasetId: z.string().uuid().optional(),
+    selectedMetrics: z.array(z.enum(allowedVitalsMetrics)).min(1).max(allowedVitalsMetrics.length).optional(),
+    wrappedAccessKey: z.string().min(1).max(4096),
+    wrappingIv: z.string().min(1).max(256),
+    encryptedStoragePath: z.string().min(1).max(1024).optional(),
+    encryptionIv: z.string().min(1).max(256).optional(),
+  })
+  .superRefine((item, ctx) => {
+    const targetCount = [item.documentId, item.sanitizedArtifactId, item.vitalsDatasetId].filter(Boolean).length;
+    if (targetCount !== 1) {
+      ctx.addIssue({ code: "custom", message: "Each share item must reference exactly one record." });
+    }
+    const isVitals = Boolean(item.vitalsDatasetId);
+    const hasCompleteVitalsPayload = Boolean(item.selectedMetrics && item.encryptedStoragePath && item.encryptionIv);
+    const hasAnyVitalsField = Boolean(item.selectedMetrics || item.encryptedStoragePath || item.encryptionIv);
+    if ((isVitals && !hasCompleteVitalsPayload) || (!isVitals && hasAnyVitalsField)) {
+      ctx.addIssue({ code: "custom", message: "Vitals shares require metrics and a share-specific encrypted blob." });
+    }
+  });
+
+export const createShareSchema = z
+  .object({
+    providerLabel: z.string().trim().min(1).max(200),
+    providerType: z.string().trim().min(1).max(100),
+    purpose: z.string().trim().min(1).max(200),
+    expiresAt: z.string().datetime(),
+    oneTime: z.boolean().default(false),
+    items: z.array(shareItemSchema).min(1).max(100),
+  })
+  .refine((input) => new Date(input.expiresAt).getTime() > Date.now(), {
+    path: ["expiresAt"],
+    message: "Expiry must be in the future.",
+  });
 
 export const accessEventSchema = z.object({
-  eventType: z.enum([
-    "SHARE_CREATED",
-    "SHARE_OPENED",
-    "PAYLOAD_RETRIEVED",
-    "DECRYPTION_CONFIRMED",
-    "SHARE_REVOKED",
-    "SHARE_EXPIRED",
-    "ONE_TIME_CONSUMED",
-  ]),
-  actorType: z.enum(["patient", "provider", "system"]),
+  eventType: z.literal("DECRYPTION_CONFIRMED"),
+  actorType: z.literal("provider"),
 });
 
 export const vitalsMappingFieldSchema = z.enum([

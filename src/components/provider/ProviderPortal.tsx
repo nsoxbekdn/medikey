@@ -67,9 +67,7 @@ export function ProviderPortal({ shareId }: { shareId: string }) {
       const secret = readFragmentSecret();
       try {
         if (!secret) {
-          setError(
-            "Missing decryption secret. The secret lives only in the original link (after #) and is cleared from this page once read — open the link from the patient again.",
-          );
+          setError("Unable to decrypt shared record. Open the original secure link from the patient.");
           return;
         }
 
@@ -77,7 +75,7 @@ export function ProviderPortal({ shareId }: { shareId: string }) {
         try {
           shareSecretKey = await importShareSecret(secret);
         } catch {
-          setError("The link secret looks corrupted.");
+          setError("Unable to decrypt shared record.");
           return;
         }
         // Key is in memory now; drop the fragment from the address bar / history.
@@ -125,7 +123,7 @@ export function ProviderPortal({ shareId }: { shareId: string }) {
           )
         ).filter((item): item is DecryptedItem => item !== null);
         if (decrypted.length === 0 && rawItems.length > 0) {
-          setError("Decryption failed for every shared record — the link secret is wrong or the data is corrupted.");
+          setError("Unable to decrypt shared record.");
           return;
         }
         if (decrypted.some((item) => item.kind === "vitals")) {
@@ -156,9 +154,9 @@ export function ProviderPortal({ shareId }: { shareId: string }) {
 
   if (status.status !== "ACTIVE") {
     const messages: Record<string, string> = {
-      REVOKED: "The patient has withdrawn access to these records.",
-      EXPIRED: "This patient-controlled share is no longer available.",
-      CONSUMED: "This one-time link has already been used.",
+      REVOKED: "Access revoked.",
+      EXPIRED: "Access expired.",
+      CONSUMED: "One-time access used.",
     };
     return (
       <main className="mx-auto max-w-lg px-4 py-16 text-center">

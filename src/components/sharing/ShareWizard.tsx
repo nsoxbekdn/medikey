@@ -22,13 +22,12 @@ import { buildShareUrl } from "@/lib/sharing/url";
 import { SHARE_DURATION_PRESETS } from "@/lib/sharing/status";
 import { mapWithConcurrency } from "@/lib/async/concurrency";
 import { toast } from "sonner";
+import { selectVitalsMetrics, SHAREABLE_VITAL_METRICS, ShareableVitalsMetric } from "@/lib/sharing/vitals";
 
 // Bounded, not unbounded Promise.all: caps how many decrypted vitals buffers
 // (and re-encryption jobs) are held in memory at once when a share includes
 // several datasets.
 const VITALS_SHARE_CONCURRENCY = 4;
-
-const VITAL_METRICS = ["systolic", "diastolic", "heartRate", "glucose", "spo2", "weight"] as const;
 
 type SelectableDoc = DocumentRow & { sanitized: SanitizedArtifactRow | null };
 
@@ -116,8 +115,9 @@ export function ShareWizard() {
         : new Date(Date.now() + (SHARE_DURATION_PRESETS.find((p) => p.label === durationPreset)?.ms ?? 0)).toISOString();
     setBusy(true);
     setError(null);
+    const uploadedSharePaths: string[] = [];
+    const supabase = createSupabaseBrowserClient();
     try {
-      const supabase = createSupabaseBrowserClient();
       const [{ key: shareSecretKey, secretB64Url }, sessionRes] = await Promise.all([
         generateShareSecret(),
         supabase.auth.getSession(),
@@ -175,22 +175,17 @@ export function ShareWizard() {
         const plainBuf = await aesDecryptBytes(datasetKey, { ciphertext: bytes, iv: dataset.encryption_iv });
         const points: VitalsPoint[] = JSON.parse(bufToUtf8(plainBuf));
 
-        const metricList = Array.from(metrics);
-        const filtered = points.map((p) => {
-          const out: VitalsPoint = { timestamp: p.timestamp };
-          for (const m of metricList) {
-            const key = m as keyof VitalsPoint;
-            if (typeof p[key] === "number") (out as unknown as Record<string, number>)[key] = p[key] as number;
-          }
-          return out;
-        });
+        const metricList = Array.from(metrics) as ShareableVitalsMetric[];
+        const filtered = selectVitalsMetrics(points, metricList);
 
         const ephemeralKey = await generateAesKey();
         const encrypted = await aesEncryptBytes(ephemeralKey, utf8ToBuf(JSON.stringify(filtered)));
         const path = `${user.id}/${uuidv4()}`;
-        await supabase.storage
+        const { error: uploadError } = await supabase.storage
           .from("encrypted-blobs")
           .upload(path, encrypted.ciphertext as BlobPart, { contentType: "application/octet-stream" });
+        if (uploadError) throw uploadError;
+        uploadedSharePaths.push(path);
 
         const ephemeralRaw = await exportAesKeyRaw(ephemeralKey);
         const wrapped = await aesEncrypt(shareSecretKey, ephemeralRaw);
@@ -232,6 +227,11 @@ export function ShareWizard() {
       setResult({ shareId, url, qrDataUrl, receiptCode });
       toast.success("Secure share created.");
     } catch (err) {
+      // Vitals use share-specific ciphertext. If the transaction fails, remove
+      // only the blobs created by this attempt so private Storage has no orphans.
+      if (uploadedSharePaths.length > 0) {
+        await supabase.storage.from("encrypted-blobs").remove(uploadedSharePaths).catch(() => undefined);
+      }
       setError(err instanceof Error ? err.message : "Failed to create share.");
     } finally {
       setBusy(false);
@@ -339,7 +339,7 @@ export function ShareWizard() {
                   <li key={ds.id} className="rounded-md border px-3 py-2">
                     <p className="text-sm font-medium">{ds.name}</p>
                     <div className="mt-1 flex flex-wrap gap-3 text-sm">
-                      {VITAL_METRICS.map((metric) => (
+                      {SHAREABLE_VITAL_METRICS.map((metric) => (
                         <label key={metric} className="flex items-center gap-2">
                           <Checkbox
                             checked={selectedDatasets[ds.id]?.has(metric) ?? false}
