@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { v4 as uuidv4 } from "uuid";
-import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Card, CardContent } from "@/components/ui/card";
 import { UploadDropzone } from "@/components/upload/UploadDropzone";
-import { Loader2 } from "lucide-react";
-import { extractDocumentText, isSupportedFile, MAX_FILE_SIZE_BYTES, type ExtractStatus } from "@/lib/documents/text";
 import { PrivacyXRay } from "@/components/privacy/PrivacyXRay";
-import { PIIMatch } from "@/lib/db/types";
+import { Check, Circle, FileText, Loader2, XCircle } from "lucide-react";
+import { extractDocumentText, isSupportedFile, MAX_FILE_SIZE_BYTES, type ExtractStatus } from "@/lib/documents/text";
+import { PIIMatch, VitalsPoint } from "@/lib/db/types";
 import { detectPII } from "@/lib/pii/detectors";
 import { sanitizeText, verifyNoLeakage } from "@/lib/pii/sanitizer";
 import { useVault } from "@/lib/vault/VaultProvider";
@@ -18,21 +18,18 @@ import { wrapKey } from "@/lib/crypto/key-wrap";
 import { sha256Hex } from "@/lib/crypto/hash";
 import { utf8ToBuf } from "@/lib/crypto/encoding";
 import { createSupabaseBrowserClient } from "@/lib/db/client";
+import { buildVitalsPoints, parseVitalsCsv } from "@/lib/vitals/parse";
+import { needsManualMapping } from "@/lib/vitals/normalize";
 import { toast } from "sonner";
 
 type Step = "select" | "processing" | "review" | "saving" | "done";
+type QueueStatus = "queued" | "processing" | "review" | "saved" | "failed";
+type QueueItem = { id: string; file: File; status: QueueStatus; error?: string };
 
-const STATUS_MESSAGES: Record<string, string> = {
-  reading: "Reading locally...",
-  extracting: "Extracting text...",
-  scanning: "Scanning identifiers...",
-  waiting: "Waiting for your review...",
-  encrypting: "Encrypting in this browser...",
-  uploading: "Uploading ciphertext...",
-  saved: "Saved securely.",
+const STATUS_LABEL: Record<QueueStatus, string> = {
+  queued: "Queued", processing: "Processing", review: "Privacy review / ready",
+  saved: "Encrypted / saved", failed: "Failed",
 };
-
-// Maps wizard state onto the 4-step workflow stepper (Upload, Privacy X-Ray, Encrypt, Vault).
 const STEP_INDEX: Record<Step, number> = { select: 0, processing: 0, review: 1, saving: 2, done: 3 };
 
 export function UploadWizard({ onStepChange }: { onStepChange?: (index: number) => void }) {
@@ -40,174 +37,147 @@ export function UploadWizard({ onStepChange }: { onStepChange?: (index: number) 
   const { vault, unlocked } = useVault();
   const [step, setStep] = useState<Step>("select");
   const [statusMessage, setStatusMessage] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const queueRef = useRef<QueueItem[]>([]);
+  const [currentId, setCurrentId] = useState<string | null>(null);
   const [extractedText, setExtractedText] = useState("");
   const [matches, setMatches] = useState<PIIMatch[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [ocrActive, setOcrActive] = useState(false);
+  const current = queue.find((item) => item.id === currentId) ?? null;
+  const currentPosition = current ? queue.findIndex((item) => item.id === current.id) + 1 : 0;
 
-  useEffect(() => {
-    onStepChange?.(STEP_INDEX[step]);
-  }, [step, onStepChange]);
+  useEffect(() => onStepChange?.(STEP_INDEX[step]), [step, onStepChange]);
 
-  async function onFileSelected(f: File) {
-    setError(null);
-    setOcrActive(false);
-    if (!isSupportedFile(f)) {
-      setError("Unsupported file type. Please upload a PDF, TXT, CSV, JPG, or PNG file.");
-      return;
-    }
-    if (f.size > MAX_FILE_SIZE_BYTES) {
-      setError("File too large. MediKey supports files up to 15MB in this demo.");
-      return;
-    }
-    setFile(f);
-    setStep("processing");
-    setStatusMessage(STATUS_MESSAGES.reading);
+  function replaceQueue(items: QueueItem[]) { queueRef.current = items; setQueue(items); }
+  function updateItem(id: string, patch: Partial<QueueItem>) {
+    replaceQueue(queueRef.current.map((item) => item.id === id ? { ...item, ...patch } : item));
+  }
+
+  async function saveVitals(file: File) {
+    if (!vault) throw new Error("Vault is locked.");
+    const parsed = parseVitalsCsv(await file.text());
+    if (parsed.rows.length === 0) throw new Error("No rows found in this CSV.");
+    if (needsManualMapping(parsed.mapping)) throw new Error("CSV needs manual timestamp mapping. Import it from Vitals.");
+    const points: VitalsPoint[] = buildVitalsPoints(parsed.rows, parsed.mapping);
+    if (points.length === 0) throw new Error("No valid rows after mapping — check date formats.");
+    const datasetKey = await generateAesKey();
+    const supabase = createSupabaseBrowserClient();
+    const [encrypted, wrapped, sessionRes] = await Promise.all([
+      aesEncryptBytes(datasetKey, utf8ToBuf(JSON.stringify(points))), wrapKey(vault.rootKey, datasetKey), supabase.auth.getSession(),
+    ]);
+    const user = sessionRes.data.session?.user;
+    if (!user) throw new Error("Not signed in.");
+    const path = `${user.id}/${uuidv4()}`;
+    const { error: uploadError } = await supabase.storage.from("encrypted-blobs").upload(path, encrypted.ciphertext as BlobPart, { contentType: "application/octet-stream" });
+    if (uploadError) throw uploadError;
+    const { error: insertError } = await supabase.from("vitals_datasets").insert({
+      owner_id: user.id, name: file.name.replace(/\.csv$/i, ""), source_type: "csv", encrypted_payload_path: path,
+      encryption_iv: encrypted.iv, wrapped_dataset_key: wrapped.ciphertext, wrapping_iv: wrapped.iv, schema_version: 1,
+      start_at: points[0].timestamp, end_at: points.at(-1)!.timestamp,
+    });
+    if (insertError) throw insertError;
+  }
+
+  async function processNext() {
+    const next = queueRef.current.find((item) => item.status === "queued");
+    if (!next) { setCurrentId(null); setStep("done"); setStatusMessage("Batch complete."); router.refresh(); return; }
+    setCurrentId(next.id);
+    updateItem(next.id, { status: "processing", error: undefined });
+    setStep("processing"); setError(null); setOcrActive(false); setStatusMessage("Reading locally...");
     try {
-      setStatusMessage(STATUS_MESSAGES.extracting);
-      const text = await extractDocumentText(f, (status: ExtractStatus) => {
+      if (/\.csv$/i.test(next.file.name) || next.file.type === "text/csv") {
+        setStatusMessage("Parsing and encrypting vitals locally...");
+        await saveVitals(next.file);
+        updateItem(next.id, { status: "saved" });
+        toast.success(`${next.file.name} encrypted and saved.`);
+        await processNext();
+        return;
+      }
+      const text = await extractDocumentText(next.file, (status: ExtractStatus) => {
         switch (status.phase) {
-          case "extracting-pdf":
-            setStatusMessage(`Reading page ${status.page} of ${status.totalPages}`);
-            break;
-          case "scanned-detected":
-            setOcrActive(true);
-            setStatusMessage("Scanned document detected — extracting text privately on this device...");
-            break;
-          case "ocr-page":
-            setOcrActive(true);
-            setStatusMessage(`Extracting text privately — page ${status.page} of ${status.totalPages}`);
-            break;
-          case "ocr-image":
-            setOcrActive(true);
-            setStatusMessage("Extracting text privately on this device...");
-            break;
+          case "extracting-pdf": setStatusMessage(`Reading page ${status.page} of ${status.totalPages}`); break;
+          case "scanned-detected": setOcrActive(true); setStatusMessage("Scanned document detected — running local OCR..."); break;
+          case "ocr-page": setOcrActive(true); setStatusMessage(`Local OCR — page ${status.page} of ${status.totalPages}`); break;
+          case "ocr-image": setOcrActive(true); setStatusMessage("Running local OCR..."); break;
         }
       });
-      setExtractedText(text);
-      setStatusMessage(STATUS_MESSAGES.scanning);
-      const found = detectPII(text);
-      setMatches(found);
-      setStep("review");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to process file locally.");
-      setStep("select");
+      setExtractedText(text); setMatches(detectPII(text)); updateItem(next.id, { status: "review" }); setStep("review");
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Failed to process file locally.";
+      updateItem(next.id, { status: "failed", error: message }); setError(`${next.file.name}: ${message}`); await processNext();
     }
   }
 
+  function onFilesSelected(files: File[]) {
+    const additions = files.map((file): QueueItem => {
+      if (!isSupportedFile(file)) return { id: uuidv4(), file, status: "failed", error: "Unsupported file type." };
+      if (file.size > MAX_FILE_SIZE_BYTES) return { id: uuidv4(), file, status: "failed", error: "File exceeds 15 MB." };
+      return { id: uuidv4(), file, status: "queued" };
+    });
+    const combined = [...queueRef.current, ...additions];
+    replaceQueue(combined);
+    if (!currentId && !combined.some((item) => item.status === "processing" || item.status === "review")) void processNext();
+  }
+
   async function onConfirmSanitization(selected: PIIMatch[]) {
-    if (!file || !vault) return;
-    setStep("saving");
-    setError(null);
+    if (!current || !vault) return;
+    setStep("saving"); updateItem(current.id, { status: "processing" }); setError(null);
     try {
-      setStatusMessage(STATUS_MESSAGES.encrypting);
-
+      setStatusMessage("Encrypting in this browser...");
       const sanitized = sanitizeText(extractedText, selected);
-      if (!verifyNoLeakage(sanitized, selected)) {
-        throw new Error("Sanitization verification failed — selected identifiers still present. Aborting save.");
-      }
-
-      // Hashing, encryption and key wrapping are independent of each other and
-      // of the signed-in user lookup below — run them concurrently.
-      const [originalBuf, supabase] = [new Uint8Array(await file.arrayBuffer()), createSupabaseBrowserClient()];
+      if (!verifyNoLeakage(sanitized, selected)) throw new Error("Sanitization verification failed. Save aborted.");
+      const originalBuf = new Uint8Array(await current.file.arrayBuffer());
       const documentKey = await generateAesKey();
-      const [sha256, originalEncrypted, sanitizedEncrypted, wrappedKey, userRes] = await Promise.all([
-        sha256Hex(originalBuf),
-        aesEncryptBytes(documentKey, originalBuf),
-        aesEncryptBytes(documentKey, utf8ToBuf(sanitized)),
-        wrapKey(vault.rootKey, documentKey),
-        supabase.auth.getUser(),
+      const supabase = createSupabaseBrowserClient();
+      const [sha256, originalEncrypted, sanitizedEncrypted, wrappedKey, userRes, sanitizedSha256] = await Promise.all([
+        sha256Hex(originalBuf), aesEncryptBytes(documentKey, originalBuf), aesEncryptBytes(documentKey, utf8ToBuf(sanitized)),
+        wrapKey(vault.rootKey, documentKey), supabase.auth.getUser(), sha256Hex(utf8ToBuf(sanitized)),
       ]);
       const user = userRes.data.user;
       if (!user) throw new Error("Not signed in.");
-
-      setStatusMessage(STATUS_MESSAGES.uploading);
+      setStatusMessage("Uploading ciphertext...");
       const originalPath = `${user.id}/${uuidv4()}`;
       const sanitizedPath = `${user.id}/${uuidv4()}`;
-
-      // Ciphertext bytes go straight to Storage — no base64 round trip.
       const [up1, up2] = await Promise.all([
-        supabase.storage
-          .from("encrypted-blobs")
-          .upload(originalPath, originalEncrypted.ciphertext as BlobPart, { contentType: "application/octet-stream" }),
-        supabase.storage
-          .from("encrypted-blobs")
-          .upload(sanitizedPath, sanitizedEncrypted.ciphertext as BlobPart, { contentType: "application/octet-stream" }),
+        supabase.storage.from("encrypted-blobs").upload(originalPath, originalEncrypted.ciphertext as BlobPart, { contentType: "application/octet-stream" }),
+        supabase.storage.from("encrypted-blobs").upload(sanitizedPath, sanitizedEncrypted.ciphertext as BlobPart, { contentType: "application/octet-stream" }),
       ]);
       if (up1.error) throw up1.error;
       if (up2.error) throw up2.error;
-
-      // sanitizedSha256 doesn't depend on the uploads above — compute it
-      // while those network calls were in flight isn't possible here since we
-      // need it for the RPC below, but it's cheap (native SHA-256, ms-level).
-      const sanitizedSha256 = await sha256Hex(utf8ToBuf(sanitized));
-
-      // One RPC = one round trip, and documents/document_key_wrappers/
-      // sanitized_artifacts are inserted atomically server-side instead of
-      // three sequential client round trips.
-      const { data: docRow, error: docErr } = (await supabase
-        .rpc("save_document", {
-          p_title_safe: file.name,
-          p_mime_type: file.type || "application/octet-stream",
-          p_encrypted_storage_path: originalPath,
-          p_encryption_iv: originalEncrypted.iv,
-          p_sha256_digest: sha256,
-          p_byte_size: file.size,
-          p_wrapped_document_key: wrappedKey.ciphertext,
-          p_wrapping_iv: wrappedKey.iv,
-          p_sanitized_storage_path: sanitizedPath,
-          p_sanitized_encryption_iv: sanitizedEncrypted.iv,
-          p_sanitized_sha256: sanitizedSha256,
-        })
-        .single()) as { data: { id: string } | null; error: { message: string } | null };
-      if (docErr || !docRow) throw docErr ?? new Error("Failed to save document.");
-
-      setStatusMessage(STATUS_MESSAGES.saved);
-      setStep("done");
-      toast.success("Record encrypted and saved to your vault.");
-      router.push(`/vault/${docRow.id}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed.");
-      setStep("review");
+      const { error: saveError } = await supabase.rpc("save_document", {
+        p_title_safe: current.file.name, p_mime_type: current.file.type || "application/octet-stream", p_encrypted_storage_path: originalPath,
+        p_encryption_iv: originalEncrypted.iv, p_sha256_digest: sha256, p_byte_size: current.file.size,
+        p_wrapped_document_key: wrappedKey.ciphertext, p_wrapping_iv: wrappedKey.iv, p_sanitized_storage_path: sanitizedPath,
+        p_sanitized_encryption_iv: sanitizedEncrypted.iv, p_sanitized_sha256: sanitizedSha256,
+      });
+      if (saveError) throw saveError;
+      updateItem(current.id, { status: "saved" }); toast.success(`${current.file.name} encrypted and saved.`);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Upload failed.";
+      updateItem(current.id, { status: "failed", error: message }); setError(`${current.file.name}: ${message}`);
     }
+    setExtractedText(""); setMatches([]); await processNext();
   }
 
   return (
     <div className="space-y-6">
-      {error && (
-        <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
+      {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
+      {queue.length === 0 && <UploadDropzone onFiles={onFilesSelected} disabled={!unlocked} maxSizeLabel="15 MB each" />}
+      {queue.length > 0 && (
+        <Card><CardContent className="space-y-3 pt-6">
+          <div className="flex items-center justify-between gap-3"><div><h2 className="text-sm font-semibold text-foreground">Upload queue</h2><p className="text-xs text-muted-foreground">Files are processed one at a time.</p></div>{currentPosition > 0 && step !== "done" && <span className="text-sm font-medium text-foreground">Processing {currentPosition} of {queue.length}</span>}</div>
+          <ul className="divide-y divide-border rounded-lg border border-border">
+            {queue.map((item) => <li key={item.id} className="flex items-center gap-3 px-3 py-2.5">
+              {item.status === "processing" ? <Loader2 className="h-4 w-4 animate-spin text-blue" /> : item.status === "saved" ? <Check className="h-4 w-4 text-success" /> : item.status === "failed" ? <XCircle className="h-4 w-4 text-destructive" /> : item.status === "review" ? <FileText className="h-4 w-4 text-blue" /> : <Circle className="h-4 w-4 text-muted-foreground-soft" />}
+              <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-foreground">{item.file.name}</p>{item.error && <p className="truncate text-xs text-destructive">{item.error}</p>}</div><span className="shrink-0 text-xs text-muted-foreground">{STATUS_LABEL[item.status]}</span>
+            </li>)}
+          </ul>
+        </CardContent></Card>
       )}
-
-      {step === "select" && (
-        <UploadDropzone onFile={onFileSelected} disabled={!unlocked} maxSizeLabel="15 MB" />
-      )}
-
-      {(step === "processing" || step === "saving") && (
-        <Card>
-          <CardContent className="flex min-h-[340px] flex-col items-center justify-center gap-3 text-center">
-            <Loader2 className="h-5 w-5 animate-spin text-blue" />
-            <div className="text-sm font-medium text-foreground">{statusMessage}</div>
-            <div className="text-xs text-muted-foreground">Processing happens in this browser.</div>
-            {ocrActive && (
-              <div className="text-xs text-muted-foreground-soft">
-                OCR runs locally in your browser. The scanned document is not sent to an external OCR service.
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {step === "review" && (
-        <PrivacyXRay
-          originalText={extractedText}
-          matches={matches}
-          onMatchesChange={setMatches}
-          onConfirm={onConfirmSanitization}
-        />
-      )}
+      {(step === "processing" || step === "saving") && <Card><CardContent className="flex min-h-[220px] flex-col items-center justify-center gap-3 text-center"><Loader2 className="h-5 w-5 animate-spin text-blue" /><div className="text-sm font-medium text-foreground">{statusMessage}</div><div className="text-xs text-muted-foreground">Processing happens in this browser.</div>{ocrActive && <div className="text-xs text-muted-foreground-soft">OCR runs locally. No document is sent to an external OCR service.</div>}</CardContent></Card>}
+      {step === "review" && <PrivacyXRay originalText={extractedText} matches={matches} onMatchesChange={setMatches} onConfirm={onConfirmSanitization} />}
+      {step === "done" && <div className="flex justify-end"><button type="button" onClick={() => { replaceQueue([]); setStep("select"); setError(null); }} className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted">Upload more files</button></div>}
     </div>
   );
 }

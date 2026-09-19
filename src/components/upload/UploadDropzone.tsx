@@ -6,11 +6,11 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export function UploadDropzone({
-  onFile,
+  onFiles,
   disabled,
   maxSizeLabel,
 }: {
-  onFile: (file: File) => void;
+  onFiles: (files: File[]) => void;
   disabled?: boolean;
   maxSizeLabel: string;
 }) {
@@ -18,8 +18,8 @@ export function UploadDropzone({
   const [dragging, setDragging] = useState(false);
 
   function handleFiles(files: FileList | null) {
-    const f = files?.[0];
-    if (f && !disabled) onFile(f);
+    const selected = files ? Array.from(files) : [];
+    if (selected.length > 0 && !disabled) onFiles(selected);
   }
 
   return (
@@ -45,7 +45,7 @@ export function UploadDropzone({
         <FileText className="h-5 w-5 text-blue" strokeWidth={1.75} />
       </div>
       <div className="text-[15px] font-semibold text-foreground" aria-live="polite">
-        {dragging ? "Release to process locally" : "Drop your medical record here"}
+        {dragging ? "Release to process locally" : "Drop your medical records here"}
       </div>
       <div className="mt-1 text-sm text-muted-foreground">{dragging ? "Your file stays on this device" : "or click to browse files"}</div>
       <Button
@@ -65,6 +65,7 @@ export function UploadDropzone({
       <input
         ref={inputRef}
         type="file"
+        multiple
         accept=".pdf,.txt,.csv,.jpg,.jpeg,.png,application/pdf,text/plain,text/csv,image/jpeg,image/png"
         className="hidden"
         disabled={disabled}
