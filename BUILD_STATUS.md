@@ -1,6 +1,19 @@
 # BUILD_STATUS
 
-Last verified: 2026-09-19 · `npm run lint` ✅ (4 cosmetic warnings) · `npm run typecheck` ✅ · `npm test` ✅ 18/18 · `npm run build` ✅ · live flow verified in browser against hosted Supabase.
+Last verified: 2026-09-19 · `npm run lint` ✅ (4 cosmetic warnings) · `npm run typecheck` ✅ · `npm test` ✅ 23/23 · `npm run build` ✅ · live flow previously verified in browser against hosted Supabase; new remote-sharing migration still requires deployment validation.
+
+## Remote sharing
+
+| Check | Status |
+|---|---|
+| Production-origin URL (`window.location.origin`) | PASS |
+| Transactional owner-bound share creation | PASS |
+| Direct private Storage download (45-second URL) | PASS |
+| Fragment secret never sent/stored | PASS |
+| Selective documents / vitals payload boundary | PASS |
+| Expiry / revocation / atomic one-time state | PASS |
+| Cross-network provider test on deployed Vercel URL | FAIL — pending deployment/manual two-network test |
+| Patient-offline-after-share test | FAIL — pending deployment/manual test |
 
 ## Fully implemented (MVP — Definition of Done §65, all 24 items)
 

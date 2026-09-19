@@ -30,7 +30,7 @@ Medical data is fragmented across labs, hospitals and wearables, is deeply sensi
 | Read-only provider portal with countdown, local decryption | ✅ |
 | Consent receipt, data-sharing "nutrition label" | ✅ |
 | Access log timeline (no keys / plaintext ever logged) | ✅ |
-| Breach simulator (shows real stored ciphertext bytes) | ✅ |
+| Technical breach demo (feature-flagged; absent from customer navigation) | ✅ |
 | AI Health Copilot | 🟡 mock provider + sanitized-RAG scaffolding |
 | IPFS storage | 🟡 interface + stub adapter |
 | Research mode, emergency card, relationship graph | ⬜ future scope |
@@ -55,8 +55,9 @@ Medical data is fragmented across labs, hospitals and wearables, is deeply sensi
 +----------+----------+        +----------------------+
            |
 PROVIDER BROWSER
-  /share/<id>#<secret>  -> GET status (expiry/revocation enforced)
-                        -> GET payload (ciphertext + wrapped keys, or 403)
+  /share/<id>#<secret>  -> GET access (expiry/revocation/one-time enforced)
+                        -> 45-second private Storage URLs + wrapped keys, or 403
+                        -> direct ciphertext download from Supabase
                         -> unwrap with fragment secret, decrypt locally
                         -> read-only view
 ```
@@ -87,10 +88,10 @@ Every AES-GCM call uses a fresh random 12-byte IV stored alongside the ciphertex
 1. Patient selects items and an expiry; browser generates a random share secret.
 2. For each document: unwrap its key with the vault root key, re-wrap it under the share secret.
 3. For each vitals dataset: decrypt, **filter to the selected metrics only**, re-encrypt with a fresh ephemeral key, upload that new blob, wrap the ephemeral key under the share secret. An unselected metric never reaches the provider even as ciphertext.
-4. `POST /api/shares` stores the share, items and wrapped keys; logs `SHARE_CREATED`; issues a consent receipt.
+4. `POST /api/shares` atomically stores the owner-validated share, items and wrapped keys; logs `SHARE_CREATED`; issues a consent receipt.
 5. URL is built as `/share/<id>#<secret>`. The fragment is not sent in HTTP requests.
-6. Provider's browser calls `/status`, then `/payload`; the server derives effective state from `revoked_at` / `consumed_at` / `expires_at` (never trusts the `status` column) and returns **403** unless ACTIVE.
-7. Provider's browser unwraps and decrypts locally; posts `DECRYPTION_CONFIRMED`; one-time links are consumed after the first successful decrypt.
+6. Provider's browser calls `/access`; the server derives effective state from `revoked_at` / `consumed_at` / `expires_at`, prepares 45-second private Storage URLs, atomically claims one-time access, and returns **403** unless ACTIVE.
+7. Provider downloads ciphertext directly from private Storage, then unwraps and decrypts locally; Vercel and Supabase never receive medical plaintext.
 
 ### Time-bound access semantics
 
@@ -122,7 +123,7 @@ MediKey does **not** draw black boxes over PDFs (that leaves text extractable). 
 
 ### RLS / security model
 
-Every patient table has RLS with `owner_id = auth.uid()`. There is deliberately **no anonymous SELECT policy** on any table and no anonymous storage policy. Providers never touch the database directly: `/api/shares/[id]/{status,payload,event,consume}` use the service-role key server-side, accept only an opaque share ID, enforce state, and return only that share's items. `revoke` requires the owner's session.
+Every patient table has RLS with `owner_id = auth.uid()`. There is deliberately **no anonymous SELECT policy** on any table and no anonymous storage policy. Providers never touch the database directly: `/api/shares/[id]/access` uses the service-role key server-side, accepts only an opaque share ID, enforces state, and returns only that share's items. `revoke` requires the owner's session.
 
 ---
 
@@ -133,7 +134,7 @@ npm install
 cp .env.example .env   # fill in Supabase values
 ```
 
-Apply `supabase/migrations/0001_init.sql` then `0002_storage.sql` (Supabase SQL Editor, or `supabase db push --db-url ...`). In **Authentication → Sign In / Providers → Email**, turn off *Confirm email* for demo accounts.
+Apply all files in `supabase/migrations` in numeric order (Supabase CLI migration push is preferred). In **Authentication → Sign In / Providers → Email**, turn off *Confirm email* only for demo accounts.
 
 ### Environment variables
 
@@ -172,8 +173,8 @@ Vercel + hosted Supabase. Set the env vars above in Vercel (service-role and AI 
 |---|---|---|
 | A ciphertext storage | downloaded stored blob with service key, grepped for plaintext | ✅ 1190 B of random bytes, nothing found |
 | B wrong key | tampered fragment secret | ✅ clean error, no plaintext |
-| C expired share | set `expires_at` in past while `status` column still ACTIVE | ✅ payload 403, UI ACCESS EXPIRED |
-| D revoked share | Revoke → provider refresh | ✅ payload 403, UI ACCESS REVOKED |
+| C expired share | set `expires_at` in past while `status` column still ACTIVE | ✅ access 403, UI ACCESS EXPIRED |
+| D revoked share | Revoke → provider refresh | ✅ access 403, UI ACCESS REVOKED |
 | E PII derivative | `npm test` | ✅ exact expected output, no leakage |
 | F share isolation | anon key vs every table + known blob path | ✅ `[]` everywhere, storage 400 |
 | G vitals selection | shared systolic+diastolic only | ✅ payload carries 2 metrics; provider renders BP chart only |
