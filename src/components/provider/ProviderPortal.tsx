@@ -14,6 +14,12 @@ import { Check, Clock, FileText, Info, Lock, Shield, Users } from "lucide-react"
 import { VitalsPoint } from "@/lib/db/types";
 import { getDocumentPreviewKind, type DocumentPreviewKind } from "@/lib/provider/documentPreview";
 import { parseProviderVitalsPayload } from "@/lib/provider/vitals";
+import {
+  chooseShareSecret,
+  clearSessionShareSecret,
+  readSessionShareSecret,
+  storeSessionShareSecret,
+} from "@/lib/provider/shareSecretSession";
 
 type ProviderVitalsComponent = typeof import("./ProviderVitalsSection").ProviderVitalsSection;
 
@@ -67,6 +73,11 @@ const UNREACHABLE: ScreenError = {
   description: "Could not reach MediKey. Try again shortly.",
 };
 
+const SESSION_CLOSED: ScreenError = {
+  title: "Provider session closed",
+  description: "The decryption secret was removed from this browser tab. Reopen the original secure link to view this share.",
+};
+
 const NON_ACTIVE_COPY: Record<string, ScreenError> = {
   EXPIRED: {
     title: "Access expired",
@@ -113,7 +124,8 @@ export function ProviderPortal({ shareId }: { shareId: string }) {
     if (started.current) return;
     started.current = true;
     (async () => {
-      const secret = readFragmentSecret();
+      const fragmentSecret = readFragmentSecret();
+      const secret = chooseShareSecret(fragmentSecret, readSessionShareSecret(shareId));
       try {
         if (!secret) {
           setError(DECRYPT_FAILURE);
@@ -124,15 +136,27 @@ export function ProviderPortal({ shareId }: { shareId: string }) {
         try {
           shareSecretKey = await importShareSecret(secret);
         } catch {
+          if (fragmentSecret) clearSessionShareSecret(shareId);
           setError(DECRYPT_FAILURE);
           return;
         }
-        // Key is in memory now; drop the fragment from the address bar / history.
-        history.replaceState(null, "", location.pathname);
+        if (fragmentSecret) {
+          // Persist only after successful validation. If sessionStorage is
+          // unavailable, leave the fragment intact so refresh remains usable.
+          try {
+            storeSessionShareSecret(shareId, fragmentSecret);
+            history.replaceState(null, "", location.pathname);
+          } catch {
+            // The validated fragment remains in the URL as a safe fallback.
+          }
+        }
 
         const accessRes = await fetch(`/api/shares/${shareId}/access`, { cache: "no-store" });
         const accessData = (await accessRes.json()) as StatusResponse & { items?: AccessItem[]; error?: string };
         if (accessData.shareId) setStatus(accessData);
+        if (["EXPIRED", "REVOKED", "CONSUMED"].includes(accessData.status)) {
+          clearSessionShareSecret(shareId);
+        }
         if (!accessRes.ok) {
           if (!accessData.shareId) setError(UNAVAILABLE);
           return;
@@ -199,6 +223,7 @@ export function ProviderPortal({ shareId }: { shareId: string }) {
         const firstDoc = decrypted.find((item) => item.kind !== "vitals");
         if (firstDoc) setActiveDocId(firstDoc.itemId);
         setItems(decrypted);
+        if (accessData.oneTime) clearSessionShareSecret(shareId);
         logEvent(shareId, "DECRYPTION_CONFIRMED");
       } catch {
         setError(UNREACHABLE);
@@ -206,9 +231,16 @@ export function ProviderPortal({ shareId }: { shareId: string }) {
     })();
   }, [shareId]);
 
+  const closeAndWipe = () => {
+    clearSessionShareSecret(shareId);
+    setItems(null);
+    setStatus(null);
+    setError(SESSION_CLOSED);
+  };
+
   if (!status && !error) {
     return (
-      <ProviderShell>
+      <ProviderShell onCloseAndWipe={closeAndWipe}>
         <ProviderSkeleton />
       </ProviderShell>
     );
@@ -247,7 +279,7 @@ export function ProviderPortal({ shareId }: { shareId: string }) {
     .join(", ");
 
   return (
-    <ProviderShell status={status.status}>
+    <ProviderShell status={status.status} onCloseAndWipe={closeAndWipe}>
       <div className="space-y-6">
         <div className="space-y-2">
           <h1 className="text-3xl font-semibold tracking-tight text-foreground">Secure Shared Record</h1>

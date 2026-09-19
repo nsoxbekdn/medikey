@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Cross } from "lucide-react";
+import { Cross, X } from "lucide-react";
 
 const STATUS_VARIANT: Record<string, "success" | "warning" | "outline"> = {
   ACTIVE: "success",
@@ -21,7 +21,15 @@ const STATUS_LABEL: Record<string, string> = {
 // single-purpose page. Provider identity is intentionally never shown here:
 // access is via an anonymous fragment-secret link, so there is no real
 // authenticated provider identity to display.
-export function ProviderShell({ status, children }: { status?: string; children: ReactNode }) {
+export function ProviderShell({
+  status,
+  onCloseAndWipe,
+  children,
+}: {
+  status?: string;
+  onCloseAndWipe?: () => void;
+  children: ReactNode;
+}) {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card">
@@ -40,6 +48,17 @@ export function ProviderShell({ status, children }: { status?: string; children:
           <div className="flex items-center gap-2">
             <Badge variant="outline">Read only</Badge>
             {status && <Badge variant={STATUS_VARIANT[status] ?? "outline"}>{STATUS_LABEL[status] ?? status}</Badge>}
+            {onCloseAndWipe && (
+              <button
+                type="button"
+                onClick={onCloseAndWipe}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden="true" />
+                <span className="hidden sm:inline">Close &amp; wipe</span>
+                <span className="sm:hidden">Close</span>
+              </button>
+            )}
           </div>
         </div>
       </header>
