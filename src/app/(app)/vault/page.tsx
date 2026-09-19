@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { createSupabaseServerClient } from "@/lib/db/server";
+import { createSupabaseServerClient, getVerifiedUser } from "@/lib/db/server";
 import { DocumentRow } from "@/lib/db/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -7,9 +7,7 @@ import { Button } from "@/components/ui/button";
 
 export default async function VaultPage() {
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getVerifiedUser();
   const { data } = await supabase
     .from("documents")
     .select("*")

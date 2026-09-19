@@ -1,13 +1,10 @@
 import { redirect } from "next/navigation";
-import { createSupabaseServerClient } from "@/lib/db/server";
+import { getVerifiedUser } from "@/lib/db/server";
 import { VaultProvider } from "@/lib/vault/VaultProvider";
 import { AppShell } from "@/components/layout/AppShell";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getVerifiedUser();
   if (!user) redirect("/auth/sign-in");
 
   return (

@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { createSupabaseServerClient } from "@/lib/db/server";
+import { createSupabaseServerClient, getVerifiedUser } from "@/lib/db/server";
 import { ShareRow, AccessLogRow, ConsentReceiptRow } from "@/lib/db/types";
 import { deriveShareStatus } from "@/lib/sharing/status";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,9 +12,7 @@ export default async function ShareDetailPage({
 }) {
   const { shareId } = await params;
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getVerifiedUser();
 
   const { data: share } = await supabase
     .from("shares")

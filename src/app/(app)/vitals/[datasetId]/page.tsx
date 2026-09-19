@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { createSupabaseServerClient } from "@/lib/db/server";
+import { createSupabaseServerClient, getVerifiedUser } from "@/lib/db/server";
 import { VaultUnlockGate } from "@/components/vault/VaultUnlockGate";
 import { VitalsDatasetViewer } from "@/components/vitals/VitalsDatasetViewer";
 import { VitalsDatasetRow } from "@/lib/db/types";
@@ -11,9 +11,7 @@ export default async function VitalsDatasetPage({
 }) {
   const { datasetId } = await params;
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getVerifiedUser();
   const { data } = await supabase
     .from("vitals_datasets")
     .select("*")

@@ -1,14 +1,12 @@
 import Link from "next/link";
-import { createSupabaseServerClient } from "@/lib/db/server";
+import { createSupabaseServerClient, getVerifiedUser } from "@/lib/db/server";
 import { ShareRow } from "@/lib/db/types";
 import { Button } from "@/components/ui/button";
 import { SharesList } from "@/components/sharing/SharesList";
 
 export default async function SharesPage() {
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getVerifiedUser();
   const { data } = await supabase
     .from("shares")
     .select("*")

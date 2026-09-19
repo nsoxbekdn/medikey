@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { createSupabaseServerClient } from "@/lib/db/server";
+import { createSupabaseServerClient, getVerifiedUser } from "@/lib/db/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { deriveShareStatus } from "@/lib/sharing/status";
@@ -8,9 +8,7 @@ import { formatDistanceToNow } from "date-fns";
 
 export default async function DashboardPage() {
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getVerifiedUser();
 
   const [{ data: documents }, { data: shares }, { count: sanitizedCount }] = await Promise.all([
     supabase

@@ -117,9 +117,36 @@ See the audit report (10 ranked findings, type/impact/risk) delivered before thi
 
 `npm run lint` → 0 errors (4 pre-existing warnings, unrelated files). `npm run typecheck` → clean. `npm test` → 18/18. Live-browser regression against the hosted Supabase project: document upload → RPC metadata save → decrypt original → integrity verified; share creation (1 sanitized document + 1 two-metric vitals dataset, bulk wrapper query + bounded-concurrency vitals path) → provider portal decrypt → sanitized text confirmed redacted, vitals chart shows only the 2 selected metrics (no heartRate/glucose/spo2/weight), chart downsampling active and stats exact.
 
+### Phase 3 — SSR auth round trips (CRITICAL)
+
+Confirmed the live project uses **asymmetric ES256 JWT signing** (checked the token header and `/auth/v1/.well-known/jwks.json` directly against the hosted project), which is what makes this safe: `getClaims()` verifies the JWT locally via WebCrypto against a cached JWKS instead of making a network round trip to the Auth server the way `getUser()` always does, and it still refreshes the session first if the token is near expiry — same verified identity, not a weaker check, per Supabase's own documented behavior for this signing mode.
+
+- `src/lib/db/server.ts`: added `getVerifiedUser()`, a `React.cache()`-wrapped helper calling `supabase.auth.getClaims()`. `cache()` memoizes per request, so a layout + page that both need the user share one verification instead of each hitting the Auth server.
+- `src/proxy.ts`: `auth.getUser()` → `auth.getClaims()` (same refresh-on-expiry behavior, no longer a forced network call on every request).
+- All 11 pages and 2 API routes that called `const { data: { user } } = await supabase.auth.getUser()` now call `const user = await getVerifiedUser()` instead (mechanical replacement, `user.id`/`user.email` usage unchanged). `(app)/layout.tsx` no longer needs its own `createSupabaseServerClient()` call at all.
+- Net effect per page render: proxy (1 local verify, Edge runtime, can't share cache with the RSC render) + layout/page (1 shared local verify via `cache()`) instead of 2-3 separate network round trips to the Auth server.
+
+**Measured** (production build, `next start`, steady state after JWKS warms up):
+
+| Route | Before | After |
+|---|---|---|
+| `/vault` | 1.1s | **~290ms** |
+| `/vitals` | 1.4-1.5s | **~295ms** |
+| `/shares` | 1.7s | **~300ms** |
+| `/settings` | 1.1s | **~285ms** |
+| `/dashboard` (2 dependent queries: shares → access_logs) | 2.0-2.9s | **~1.1-1.2s** |
+| `/activity` (2 dependent queries: shares → access_logs) | 1.4-1.5s | **~0.6-0.9s** |
+
+Single-query pages: **~800ms saved per navigation** (roughly 2 eliminated Auth round trips at ~400ms each). Dashboard/activity still make one genuinely-dependent second query (need share IDs before querying `access_logs`), so they improved by the same ~2 round trips but the remaining time is real data-dependency latency, not auth overhead.
+
+Verified: signed-in dashboard, vault, upload (unlock → PDF → X-Ray → save), and share creation all still work against the hosted project after this change; unauthenticated `/dashboard` still redirects to `/auth/sign-in` (`getVerifiedUser()` returns `null` → `redirect()` fires, same as before).
+
+### Regression testing after Phase 3
+
+`npm run lint` → 0 errors (4 pre-existing warnings). `npm run typecheck` → clean. `npm test` → 18/18. `npm run build` → clean. Signed-in and signed-out browser checks are recorded above.
+
 ## 4. Remaining work (not yet done in this pass)
 
-- **Phase 3** (SSR auth: `getClaims()`/shared cached user helper to remove the 2-3 sequential `auth.getUser()` calls per server-rendered page) — highest remaining network win, not yet implemented.
 - **Phase 7** (provider access: merge status+payload into one call, bulk item query, short-lived signed Storage URLs instead of base64-in-JSON) — the other CRITICAL item, not yet implemented.
 - **Phase 9/10** (CSV Papa worker mode, bounded-concurrency PDF page extraction with progress) — deferred; measured cost (720ms for 50k rows, 3.6s for 120 pages) is real but lower priority than Phases 3/7 per the audit's impact ranking, and 3.6s is off the main thread already (pdf.js worker).
 - **Phase 11** (bundle audit after workflow fixes) — not started.

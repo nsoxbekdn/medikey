@@ -1,12 +1,10 @@
-import { createSupabaseServerClient } from "@/lib/db/server";
+import { createSupabaseServerClient, getVerifiedUser } from "@/lib/db/server";
 import { ShareRow, AccessLogRow } from "@/lib/db/types";
 import { Card, CardContent } from "@/components/ui/card";
 
 export default async function ActivityPage() {
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getVerifiedUser();
   const { data: shares } = await supabase.from("shares").select("id, provider_label").eq("owner_id", user!.id);
   const shareIds = (shares as ShareRow[] | null)?.map((s) => s.id) ?? [];
 

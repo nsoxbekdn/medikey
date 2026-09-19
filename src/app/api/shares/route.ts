@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
-import { createSupabaseServerClient, createSupabaseServiceClient } from "@/lib/db/server";
+import { createSupabaseServerClient, createSupabaseServiceClient, getVerifiedUser } from "@/lib/db/server";
 import { createShareSchema } from "@/lib/validation/schemas";
 
 export async function POST(request: NextRequest) {
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getVerifiedUser();
   if (!user) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
 
   const body = await request.json().catch(() => null);

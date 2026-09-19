@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { createSupabaseServerClient } from "@/lib/db/server";
+import { createSupabaseServerClient, getVerifiedUser } from "@/lib/db/server";
 import { DocumentDetail } from "@/components/documents/DocumentDetail";
 import { VaultUnlockGate } from "@/components/vault/VaultUnlockGate";
 import { DocumentRow, DocumentKeyWrapperRow, SanitizedArtifactRow } from "@/lib/db/types";
@@ -11,9 +11,7 @@ export default async function DocumentPage({
 }) {
   const { documentId } = await params;
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getVerifiedUser();
 
   const { data: document } = await supabase
     .from("documents")

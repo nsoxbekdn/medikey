@@ -1,12 +1,10 @@
-import { createSupabaseServerClient } from "@/lib/db/server";
+import { createSupabaseServerClient, getVerifiedUser } from "@/lib/db/server";
 import { UserCryptoRow } from "@/lib/db/types";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 
 export default async function SettingsPage() {
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getVerifiedUser();
   const { data } = await supabase.from("user_crypto").select("*").eq("user_id", user!.id).maybeSingle();
   const crypto = data as UserCryptoRow | null;
 

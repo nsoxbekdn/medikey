@@ -1,4 +1,4 @@
-import { createSupabaseServerClient } from "@/lib/db/server";
+import { createSupabaseServerClient, getVerifiedUser } from "@/lib/db/server";
 import { DocumentRow, ShareRow } from "@/lib/db/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -13,9 +13,7 @@ export default async function BreachSimulatorPage() {
   }
 
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getVerifiedUser();
   const { data: documents } = await supabase
     .from("documents")
     .select("*")

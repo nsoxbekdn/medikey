@@ -21,7 +21,12 @@ export async function proxy(request: NextRequest) {
     }
   );
 
-  await supabase.auth.getUser();
+  // getClaims() verifies the JWT locally (this project uses asymmetric ES256
+  // signing, confirmed against the live project) instead of always making a
+  // network round trip to the Auth server like getUser() does. It still
+  // refreshes the session first if the token is near expiry, so the refresh
+  // behavior this proxy exists for is unchanged. See PERFORMANCE.md Phase 3.
+  await supabase.auth.getClaims();
 
   return response;
 }
