@@ -1,0 +1,37 @@
+SYNTHETIC DEMO DATA — NOT A REAL PATIENT
+Sunrise Diagnostics Pvt. Ltd., Bengaluru
+Clinical Biochemistry Report
+
+Patient Name: Rahul Sharma
+DOB: 14/03/1984
+Patient ID: SD-2026-48213
+UHID: UH88231904
+Phone: 9876543210
+Email: rahul.sharma84@example.com
+Aadhaar: 4821 9932 1187
+Address: 22 Lakeview Residency, Koramangala, Bengaluru 560034
+Referring Doctor: Dr. Ananya Mehta
+
+Sample collected: 12/09/2026 08:10
+Report generated: 12/09/2026 16:45
+
+LIPID PROFILE
+Total Cholesterol      212 mg/dL      (Ref: < 200)
+LDL Cholesterol        161 mg/dL      (Ref: < 100)
+HDL Cholesterol        41 mg/dL       (Ref: > 40)
+Triglycerides          178 mg/dL      (Ref: < 150)
+
+GLYCEMIC PANEL
+HbA1c                  7.4 %          (Ref: < 5.7)
+Fasting Glucose        131 mg/dL      (Ref: 70 - 99)
+
+VITAMINS
+Vitamin D (25-OH)      19 ng/mL       (Ref: 30 - 100)
+Vitamin B12            288 pg/mL      (Ref: 200 - 900)
+
+HAEMATOLOGY
+Hemoglobin             13.8 g/dL      (Ref: 13.0 - 17.0)
+Platelet Count         242 x10^3/uL   (Ref: 150 - 400)
+
+Notes: Values outside the reference range are flagged for clinical review.
+This document is synthetic and generated for a hackathon demonstration.
