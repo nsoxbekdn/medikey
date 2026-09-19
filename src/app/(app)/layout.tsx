@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/db/server";
 import { VaultProvider } from "@/lib/vault/VaultProvider";
-import { AppShell } from "@/components/dashboard/AppShell";
+import { AppShell } from "@/components/layout/AppShell";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createSupabaseServerClient();
@@ -12,7 +12,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <VaultProvider>
-      <AppShell>{children}</AppShell>
+      <AppShell userEmail={user.email ?? "Patient"}>{children}</AppShell>
     </VaultProvider>
   );
 }

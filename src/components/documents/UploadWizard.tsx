@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { v4 as uuidv4 } from "uuid";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { UploadDropzone } from "@/components/upload/UploadDropzone";
+import { Loader2 } from "lucide-react";
 import { extractDocumentText, isSupportedFile, MAX_FILE_SIZE_BYTES } from "@/lib/documents/text";
 import { PrivacyXRay } from "@/components/privacy/PrivacyXRay";
 import { PIIMatch } from "@/lib/db/types";
@@ -32,15 +32,22 @@ const STATUS_MESSAGES: Record<string, string> = {
   saved: "Saved securely.",
 };
 
-export function UploadWizard() {
+// Maps wizard state onto the 4-step workflow stepper (Upload, Privacy X-Ray, Encrypt, Vault).
+const STEP_INDEX: Record<Step, number> = { select: 0, processing: 0, review: 1, saving: 2, done: 3 };
+
+export function UploadWizard({ onStepChange }: { onStepChange?: (index: number) => void }) {
   const router = useRouter();
-  const { vault } = useVault();
+  const { vault, unlocked } = useVault();
   const [step, setStep] = useState<Step>("select");
   const [statusMessage, setStatusMessage] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [extractedText, setExtractedText] = useState("");
   const [matches, setMatches] = useState<PIIMatch[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    onStepChange?.(STEP_INDEX[step]);
+  }, [step, onStepChange]);
 
   async function onFileSelected(f: File) {
     setError(null);
@@ -167,26 +174,16 @@ export function UploadWizard() {
       )}
 
       {step === "select" && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Upload a medical record</CardTitle>
-            <CardDescription>PDF, TXT, or CSV. Parsed and scanned entirely in this browser.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <Label htmlFor="file">Select file</Label>
-            <Input
-              id="file"
-              type="file"
-              accept=".pdf,.txt,.csv"
-              onChange={(e) => e.target.files?.[0] && onFileSelected(e.target.files[0])}
-            />
-          </CardContent>
-        </Card>
+        <UploadDropzone onFile={onFileSelected} disabled={!unlocked} maxSizeLabel="15 MB" />
       )}
 
       {(step === "processing" || step === "saving") && (
         <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">{statusMessage}</CardContent>
+          <CardContent className="flex min-h-[340px] flex-col items-center justify-center gap-3 text-center">
+            <Loader2 className="h-5 w-5 animate-spin text-blue" />
+            <div className="text-sm font-medium text-foreground">{statusMessage}</div>
+            <div className="text-xs text-muted-foreground">Processing happens in this browser.</div>
+          </CardContent>
         </Card>
       )}
 

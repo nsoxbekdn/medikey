@@ -1,33 +1,60 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useVault } from "@/lib/vault/VaultProvider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Lock } from "lucide-react";
+import { Lock, LockOpen } from "lucide-react";
 
-export function VaultUnlockGate({ children }: { children: React.ReactNode }) {
+// Card that shows the unlock form, or the unlocked state. Always renders.
+export function VaultUnlockCard() {
   const { loading, hasVaultRecord, unlocked, unlock } = useVault();
   const [passphrase, setPassphrase] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (loading) return <p className="text-sm text-muted-foreground">Loading vault status...</p>;
-
-  if (!hasVaultRecord) {
+  if (loading) {
     return (
-      <Alert>
-        <AlertDescription>
-          No vault found for this account yet. <a href="/onboarding/vault" className="underline">Create one</a>.
-        </AlertDescription>
-      </Alert>
+      <Card>
+        <CardContent className="h-24 animate-pulse rounded-md" />
+      </Card>
     );
   }
 
-  if (unlocked) return <>{children}</>;
+  if (!hasVaultRecord) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Lock className="h-4 w-4 text-muted-foreground" strokeWidth={1.75} /> No vault yet
+          </CardTitle>
+          <CardDescription>Create a vault to generate your encryption keys in this browser.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button render={<Link href="/onboarding/vault" />} nativeButton={false}>
+            Create vault
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (unlocked) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <LockOpen className="h-4 w-4 text-success" strokeWidth={1.75} /> Vault unlocked
+          </CardTitle>
+          <CardDescription>Encryption keys are available only for this browser session.</CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -43,10 +70,10 @@ export function VaultUnlockGate({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <Card className="max-w-md">
+    <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <Lock className="h-4 w-4" /> Vault locked
+          <Lock className="h-4 w-4 text-muted-foreground" strokeWidth={1.75} /> Unlock your vault
         </CardTitle>
         <CardDescription>Enter your passphrase to decrypt records in this browser session.</CardDescription>
       </CardHeader>
@@ -63,15 +90,27 @@ export function VaultUnlockGate({ children }: { children: React.ReactNode }) {
               id="unlock-passphrase"
               type="password"
               required
+              autoComplete="current-password"
               value={passphrase}
               onChange={(e) => setPassphrase(e.target.value)}
             />
           </div>
-          <Button type="submit" disabled={busy}>
+          <Button type="submit" className="w-full" disabled={busy}>
             {busy ? "Unlocking..." : "Unlock vault"}
           </Button>
         </form>
       </CardContent>
     </Card>
+  );
+}
+
+// Blocks children until the vault is unlocked.
+export function VaultUnlockGate({ children }: { children: React.ReactNode }) {
+  const { loading, unlocked } = useVault();
+  if (!loading && unlocked) return <>{children}</>;
+  return (
+    <div className="max-w-md">
+      <VaultUnlockCard />
+    </div>
   );
 }
