@@ -1,122 +1,76 @@
 import Link from "next/link";
+import { ArrowRight, CheckCircle2, FileText, HeartPulse, UploadCloud } from "lucide-react";
 import { createSupabaseServerClient, getVerifiedUser } from "@/lib/db/server";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { deriveShareStatus } from "@/lib/sharing/status";
-import { ShareRow, DocumentRow, AccessLogRow } from "@/lib/db/types";
-import { formatDistanceToNow } from "date-fns";
+import { Section } from "@/components/layout/Section";
+import { DocumentRow } from "@/lib/db/types";
 
 export default async function DashboardPage() {
   const supabase = await createSupabaseServerClient();
   const user = await getVerifiedUser();
-
-  const [{ data: documents }, { data: shares }, { count: sanitizedCount }] = await Promise.all([
-    supabase
-      .from("documents")
-      .select("*")
-      .eq("owner_id", user!.id)
-      .order("created_at", { ascending: false })
-      .limit(5),
-    supabase.from("shares").select("*").eq("owner_id", user!.id),
-    supabase
-      .from("sanitized_artifacts")
-      .select("*", { count: "exact", head: true })
-      .eq("owner_id", user!.id),
+  const [{ data: documents }, { count: sanitizedCount }] = await Promise.all([
+    supabase.from("documents").select("*").eq("owner_id", user!.id).order("created_at", { ascending: false }).limit(2),
+    supabase.from("sanitized_artifacts").select("*", { count: "exact", head: true }).eq("owner_id", user!.id),
   ]);
-
-  const activeShares = ((shares as ShareRow[] | null) ?? []).filter((s) => deriveShareStatus(s) === "ACTIVE");
   const recentDocs = (documents as DocumentRow[] | null) ?? [];
-
-  let recentAccess: (AccessLogRow & { shares: { provider_label: string } | null })[] = [];
-  if ((shares as ShareRow[] | null)?.length) {
-    const shareIds = (shares as ShareRow[]).map((s) => s.id);
-    const { data } = await supabase
-      .from("access_logs")
-      .select("*, shares(provider_label)")
-      .in("share_id", shareIds)
-      .order("created_at", { ascending: false })
-      .limit(5);
-    recentAccess = (data as typeof recentAccess) ?? [];
-  }
+  const name = (user?.email?.split("@")[0] ?? "there").split(/[._-]/)[0];
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold">MediKey</h1>
-        <p className="text-muted-foreground">Your records. Your keys. Your control.</p>
-      </div>
+    <div className="space-y-10">
+      <header className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="mb-2 text-sm font-medium text-blue">Overview</p>
+          <h1 className="text-[32px] font-semibold tracking-[-0.025em] text-foreground">Good morning, <span className="capitalize">{name}</span></h1>
+          <p className="mt-2 text-[15px] text-muted-foreground">Your health information, secure and in your control.</p>
+        </div>
+        <Button nativeButton={false} render={<Link href="/upload"><UploadCloud className="h-4 w-4" />Upload record</Link>} />
+      </header>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Records encrypted</CardTitle>
-          </CardHeader>
-          <CardContent className="text-3xl font-semibold">{documents?.length ?? 0}</CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Active shares</CardTitle>
-          </CardHeader>
-          <CardContent className="text-3xl font-semibold">{activeShares.length}</CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Sanitized artifacts</CardTitle>
-          </CardHeader>
-          <CardContent className="text-3xl font-semibold">{sanitizedCount ?? 0}</CardContent>
-        </Card>
-      </div>
+      <div className="grid gap-8 xl:grid-cols-[1.05fr_0.95fr]">
+        <Section title="Your data is private and secure" description="Protection is applied before records leave your browser.">
+          <div className="grid gap-1 px-6 py-5">
+            <PrivacyCheck label="Encrypted before remote storage" />
+            <PrivacyCheck label={sanitizedCount ? `${sanitizedCount} sanitized record${sanitizedCount === 1 ? "" : "s"} available` : "Privacy scanning available before sharing"} />
+            <PrivacyCheck label="Vault protected by client-side encryption" />
+          </div>
+        </Section>
 
-      <div className="flex flex-wrap gap-3">
-        <Button nativeButton={false} render={<Link href="/upload">Upload Record</Link>} />
-        <Button variant="secondary" nativeButton={false} render={<Link href="/vitals">Import Vitals</Link>} />
-        <Button variant="secondary" nativeButton={false} render={<Link href="/shares/new">Create Secure Share</Link>} />
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Recent records</CardTitle>
-        </CardHeader>
-        <CardContent>
+        <Section title="Recent records" action={<Link href="/vault" className="flex items-center gap-1 text-sm font-medium text-blue hover:underline">View all <ArrowRight className="h-3.5 w-3.5" /></Link>}>
           {recentDocs.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No records yet. Upload your first medical document.</p>
+            <div className="px-6 py-8">
+              <p className="text-sm font-medium text-foreground">No medical records yet.</p>
+              <p className="mt-1 text-sm text-muted-foreground">Upload your first record to add it to your encrypted vault.</p>
+            </div>
           ) : (
-            <ul className="divide-y">
+            <ul className="divide-y divide-border-subtle px-6">
               {recentDocs.map((doc) => (
-                <li key={doc.id} className="flex items-center justify-between py-2 text-sm">
-                  <Link href={`/vault/${doc.id}`} className="font-medium hover:underline">
-                    {doc.title_safe}
+                <li key={doc.id}>
+                  <Link href={`/vault/${doc.id}`} className="group flex items-center gap-4 py-4">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-soft text-blue"><FileText className="h-[18px] w-[18px]" /></span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-foreground group-hover:text-blue">{doc.title_safe}</span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">Added {new Date(doc.created_at).toLocaleDateString()}</span>
+                    </span>
+                    <ArrowRight className="h-4 w-4 text-muted-foreground-soft" />
                   </Link>
-                  <span className="text-muted-foreground">{new Date(doc.created_at).toLocaleDateString()}</span>
-                  <span className="text-xs text-emerald-600">Encrypted</span>
                 </li>
               ))}
             </ul>
           )}
-        </CardContent>
-      </Card>
+        </Section>
+      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Recent access</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {recentAccess.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No provider activity yet.</p>
-          ) : (
-            <ul className="divide-y">
-              {recentAccess.map((log) => (
-                <li key={log.id} className="py-2 text-sm">
-                  <span className="font-medium">{log.shares?.provider_label ?? "Provider"}</span>{" "}
-                  <span className="text-muted-foreground">
-                    {log.event_type.replace(/_/g, " ").toLowerCase()} — {formatDistanceToNow(new Date(log.created_at))} ago
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+      <section className="border-t border-border pt-7">
+        <h2 className="text-[17px] font-semibold text-foreground">Continue your health record</h2>
+        <div className="mt-4 flex flex-wrap gap-x-8 gap-y-3">
+          <Link href="/vitals" className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-blue"><HeartPulse className="h-4 w-4" />Review vitals <ArrowRight className="h-3.5 w-3.5" /></Link>
+          <Link href="/shares/new" className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-blue"><FileText className="h-4 w-4" />Create a secure share <ArrowRight className="h-3.5 w-3.5" /></Link>
+        </div>
+      </section>
     </div>
   );
+}
+
+function PrivacyCheck({ label }: { label: string }) {
+  return <div className="flex items-center gap-3 py-2.5 text-sm text-foreground"><CheckCircle2 className="h-[18px] w-[18px] shrink-0 text-success" aria-hidden="true" /><span>{label}</span></div>;
 }

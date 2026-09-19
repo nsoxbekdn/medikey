@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { createSupabaseServerClient, getVerifiedUser } from "@/lib/db/server";
 import { DocumentRow } from "@/lib/db/types";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { FileText, UploadCloud } from "lucide-react";
+import { PageHeader } from "@/components/layout/PageHeader";
 
 export default async function VaultPage() {
   const supabase = await createSupabaseServerClient();
@@ -16,41 +16,25 @@ export default async function VaultPage() {
   const documents = (data as DocumentRow[] | null) ?? [];
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Vault</h1>
-          <p className="text-muted-foreground">Every file here is stored as ciphertext.</p>
-        </div>
-        <Button nativeButton={false} render={<Link href="/upload">Upload Record</Link>} />
-      </div>
+    <div>
+      <PageHeader title="Vault" description="Your encrypted medical records, organized in one private place." action={<Button nativeButton={false} render={<Link href="/upload"><UploadCloud className="h-4 w-4" />Upload record</Link>} />} />
 
       {documents.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center text-sm text-muted-foreground">
-            Your vault is empty. Upload a PDF, TXT, or CSV to get started.
-          </CardContent>
-        </Card>
+        <div className="rounded-xl border border-dashed border-border bg-card px-6 py-14 text-center">
+          <FileText className="mx-auto h-6 w-6 text-muted-foreground-soft" />
+          <p className="mt-4 text-sm font-medium text-foreground">No medical records yet.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Upload your first record to add it to your encrypted vault.</p>
+        </div>
       ) : (
-        <div className="grid gap-3">
+        <div className="overflow-hidden rounded-xl border border-border bg-card">
+          <div className="grid grid-cols-[1fr_auto] border-b border-border-subtle px-6 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground sm:grid-cols-[1fr_180px_140px]">
+            <span>Record</span><span className="hidden sm:block">Added</span><span>Status</span>
+          </div>
           {documents.map((doc) => (
-            <Link key={doc.id} href={`/vault/${doc.id}`}>
-              <Card className="transition-colors hover:bg-secondary/40">
-                <CardContent className="flex flex-wrap items-center justify-between gap-2 py-4">
-                  <div>
-                    <p className="font-medium">{doc.title_safe}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {new Date(doc.created_at).toLocaleString()} · {(doc.byte_size / 1024).toFixed(0)} KB
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    <Badge variant="outline" className="bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
-                      Encrypted
-                    </Badge>
-                    {doc.privacy_scan_completed && <Badge variant="outline">Privacy scanned</Badge>}
-                  </div>
-                </CardContent>
-              </Card>
+            <Link key={doc.id} href={`/vault/${doc.id}`} className="grid grid-cols-[1fr_auto] items-center gap-4 border-b border-border-subtle px-6 py-4 transition-colors last:border-b-0 hover:bg-muted/50 sm:grid-cols-[1fr_180px_140px]">
+              <span className="flex min-w-0 items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-soft text-blue"><FileText className="h-4 w-4" /></span><span className="min-w-0"><span className="block truncate text-sm font-medium text-foreground">{doc.title_safe}</span><span className="block text-xs text-muted-foreground">{(doc.byte_size / 1024).toFixed(0)} KB</span></span></span>
+              <span className="hidden text-sm text-muted-foreground sm:block">{new Date(doc.created_at).toLocaleDateString()}</span>
+              <span className="flex items-center gap-2 text-xs font-medium text-success"><span className="h-1.5 w-1.5 rounded-full bg-success" />Encrypted</span>
             </Link>
           ))}
         </div>

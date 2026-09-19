@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ShareRow } from "@/lib/db/types";
 import { deriveShareStatus, isRetrievable } from "@/lib/sharing/status";
-import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatDistanceToNowStrict } from "date-fns";
@@ -29,42 +28,29 @@ export function SharesList({ shares }: { shares: ShareRow[] }) {
 
   if (shares.length === 0) {
     return (
-      <Card>
-        <CardContent className="py-12 text-center text-sm text-muted-foreground">
-          No shares yet. Create one from the vault or vitals page.
-        </CardContent>
-      </Card>
+      <div className="rounded-xl border border-dashed border-border bg-card px-6 py-14 text-center"><p className="text-sm font-medium text-foreground">No secure shares yet.</p><p className="mt-1 text-sm text-muted-foreground">Create a share when a provider needs access to selected records.</p></div>
     );
   }
 
   return (
-    <div className="grid gap-3">
+    <div className="overflow-hidden rounded-xl border border-border bg-card">
+      <div className="hidden grid-cols-[1fr_180px_130px_120px] border-b border-border-subtle px-6 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground md:grid"><span>Recipient</span><span>Expiry</span><span>Status</span><span className="text-right">Action</span></div>
       {shares.map((share) => {
         const status = deriveShareStatus(share);
         return (
-          <Card key={share.id}>
-            <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
-              <div>
+          <div key={share.id} className="grid gap-4 border-b border-border-subtle px-6 py-5 last:border-b-0 md:grid-cols-[1fr_180px_130px_120px] md:items-center">
+              <div className="min-w-0">
                 <p className="font-medium">{share.provider_label}</p>
-                <p className="text-xs text-muted-foreground">{share.purpose}</p>
-                {status === "ACTIVE" && (
-                  <p className="text-xs text-muted-foreground">
-                    Expires in {formatDistanceToNowStrict(new Date(share.expires_at))}
-                  </p>
-                )}
+                <p className="mt-0.5 truncate text-xs text-muted-foreground">{share.purpose}</p>
               </div>
-              <div className="flex items-center gap-3">
+              <p className="text-sm text-muted-foreground">{status === "ACTIVE" ? `In ${formatDistanceToNowStrict(new Date(share.expires_at))}` : new Date(share.expires_at).toLocaleDateString()}</p>
+              <div>
                 <Badge variant="outline" className={STATUS_STYLES[status]}>
                   {status}
                 </Badge>
-                {isRetrievable(status) && (
-                  <Button size="sm" variant="destructive" onClick={() => onRevoke(share.id)} disabled={revoking === share.id}>
-                    Revoke Access
-                  </Button>
-                )}
               </div>
-            </CardContent>
-          </Card>
+              <div className="md:text-right">{isRetrievable(status) && <Button size="sm" variant="outline" onClick={() => onRevoke(share.id)} disabled={revoking === share.id}>Revoke</Button>}</div>
+          </div>
         );
       })}
     </div>
