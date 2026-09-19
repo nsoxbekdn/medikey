@@ -1,16 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { Menu } from "lucide-react";
 import { Sidebar } from "./Sidebar";
 
 export function AppShell({ userEmail, children }: { userEmail: string; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
+  const collapsed = useSyncExternalStore(subscribeToSidebarPreference, readSidebarPreference, () => false);
+
+  function updateCollapsed(next: boolean) {
+    window.localStorage.setItem("medikey-sidebar-collapsed", String(next));
+    window.dispatchEvent(new Event("medikey-sidebar-preference"));
+  }
 
   return (
     <div className="flex min-h-screen bg-background">
       <aside className="sticky top-0 hidden h-screen shrink-0 md:block">
-        <Sidebar userEmail={userEmail} />
+        <Sidebar userEmail={userEmail} collapsed={collapsed} onCollapsedChange={updateCollapsed} />
       </aside>
 
       {/* ponytail: plain fixed drawer instead of a Sheet dependency */}
@@ -30,8 +36,21 @@ export function AppShell({ userEmail, children }: { userEmail: string; children:
           </button>
           <span className="text-[15px] font-semibold text-primary">MediKey</span>
         </header>
-        <main className="mx-auto w-full max-w-[1400px] px-4 py-6 md:px-8 md:py-8">{children}</main>
+        <main className="mx-auto w-full max-w-[1280px] px-5 py-8 md:px-10 md:py-10 xl:px-12">{children}</main>
       </div>
     </div>
   );
+}
+
+function subscribeToSidebarPreference(onStoreChange: () => void) {
+  window.addEventListener("storage", onStoreChange);
+  window.addEventListener("medikey-sidebar-preference", onStoreChange);
+  return () => {
+    window.removeEventListener("storage", onStoreChange);
+    window.removeEventListener("medikey-sidebar-preference", onStoreChange);
+  };
+}
+
+function readSidebarPreference() {
+  return window.localStorage.getItem("medikey-sidebar-collapsed") === "true";
 }

@@ -65,51 +65,51 @@
   /* MediKey design tokens — clinical software x security product.
      Off-white canvas, white surfaces, deep navy text, restrained blue accent,
      subtle green for security states. Borders over shadows. */
-  --background: #f7f9fc;
-  --foreground: #101828;
+  --background: #f8fafc;
+  --foreground: #14213d;
   --card: #ffffff;
   --card-foreground: #101828;
   --popover: #ffffff;
   --popover-foreground: #101828;
-  --primary: #102a56;
+  --primary: #17365d;
   --primary-foreground: #ffffff;
-  --primary-hover: #0b1f3a;
+  --primary-hover: #102a4c;
   --secondary: #eff4ff;
   --secondary-foreground: #102a56;
   --muted: #f2f4f7;
-  --muted-foreground: #667085;
+  --muted-foreground: #64748b;
   --muted-foreground-soft: #98a2b3;
   --accent: #eff4ff;
   --accent-foreground: #155eef;
-  --blue: #155eef;
-  --blue-hover: #004eeb;
-  --blue-soft: #eff4ff;
-  --success: #12b76a;
-  --success-soft: #ecfdf3;
+  --blue: #2563a8;
+  --blue-hover: #1e518c;
+  --blue-soft: #eef5fb;
+  --success: #278663;
+  --success-soft: #eef8f3;
   --warning: #f79009;
   --warning-soft: #fffaeb;
   --destructive: #d92d20;
   --destructive-soft: #fef3f2;
   --teal: #0e9384;
   --teal-soft: #f0fdf9;
-  --border: #e4e7ec;
-  --border-subtle: #eef1f5;
-  --input: #e4e7ec;
-  --ring: #155eef;
-  --chart-1: #155eef;
-  --chart-2: #0e9384;
+  --border: #e2e8f0;
+  --border-subtle: #edf1f5;
+  --input: #dce3eb;
+  --ring: #2563a8;
+  --chart-1: #2563a8;
+  --chart-2: #2f8f75;
   --chart-3: #102a56;
   --chart-4: #f79009;
   --chart-5: #d92d20;
-  --radius: 0.625rem;
-  --sidebar: #fbfcfe;
+  --radius: 0.75rem;
+  --sidebar: #ffffff;
   --sidebar-foreground: #101828;
   --sidebar-primary: #155eef;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #eff4ff;
-  --sidebar-accent-foreground: #155eef;
-  --sidebar-border: #e4e7ec;
-  --sidebar-ring: #155eef;
+  --sidebar-accent: #eef5fb;
+  --sidebar-accent-foreground: #1e518c;
+  --sidebar-border: #e2e8f0;
+  --sidebar-ring: #2563a8;
 }
 
 @layer base {
@@ -117,7 +117,7 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
   }
   html {
     @apply font-sans;
