@@ -88,7 +88,7 @@ export function ShareWizard() {
   }, [selectedDocs]);
   const selectedVitalsDatasetCount = Object.keys(selectedDatasets).length;
   const notSharedDocCount = docs.length - selectedDocCount;
-  const notSharedMetricCount = datasets.length * VITAL_METRICS.length - selectedMetricCount;
+  const notSharedMetricCount = datasets.length * SHAREABLE_VITAL_METRICS.length - selectedMetricCount;
 
   function toggleDoc(id: string, mode: "original" | "sanitized") {
     setSelectedDocs((prev) => {
