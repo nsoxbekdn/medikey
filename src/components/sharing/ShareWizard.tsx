@@ -8,8 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useVault } from "@/lib/vault/VaultProvider";
 import { createSupabaseBrowserClient } from "@/lib/db/client";
@@ -22,6 +22,7 @@ import { buildShareUrl } from "@/lib/sharing/url";
 import { SHARE_DURATION_PRESETS } from "@/lib/sharing/status";
 import { mapWithConcurrency } from "@/lib/async/concurrency";
 import { toast } from "sonner";
+import { CountdownBadge } from "@/components/provider/CountdownBadge";
 
 // Bounded, not unbounded Promise.all: caps how many decrypted vitals buffers
 // (and re-encryption jobs) are held in memory at once when a share includes
@@ -50,9 +51,11 @@ export function ShareWizard() {
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ shareId: string; url: string; qrDataUrl: string; receiptCode: string } | null>(
-    null
-  );
+  const [result, setResult] = useState<
+    { shareId: string; url: string; qrDataUrl: string; receiptCode: string; expiresAt: string } | null
+  >(null);
+  const [qrVisible, setQrVisible] = useState(true);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -84,6 +87,9 @@ export function ShareWizard() {
     // an "original" selection risks exposing them.
     return Object.values(selectedDocs).filter((v) => v === "original").length;
   }, [selectedDocs]);
+  const selectedVitalsDatasetCount = Object.keys(selectedDatasets).length;
+  const notSharedDocCount = docs.length - selectedDocCount;
+  const notSharedMetricCount = datasets.length * VITAL_METRICS.length - selectedMetricCount;
 
   function toggleDoc(id: string, mode: "original" | "sanitized") {
     setSelectedDocs((prev) => {
@@ -229,7 +235,7 @@ export function ShareWizard() {
       // share exists and a QR code is actually requested for the result view.
       const QRCode = (await import("qrcode")).default;
       const qrDataUrl = await QRCode.toDataURL(url, { margin: 1, width: 240 });
-      setResult({ shareId, url, qrDataUrl, receiptCode });
+      setResult({ shareId, url, qrDataUrl, receiptCode, expiresAt });
       toast.success("Secure share created.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create share.");
@@ -239,18 +245,66 @@ export function ShareWizard() {
   }
 
   if (result) {
+    async function copyLink() {
+      await navigator.clipboard.writeText(result!.url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+
     return (
       <Card>
         <CardHeader>
           <CardTitle>Secure share created</CardTitle>
           <CardDescription>Consent receipt {result.receiptCode}</CardDescription>
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <CountdownBadge expiresAt={result.expiresAt} />
+            {oneTime && <Badge variant="outline">One-time link</Badge>}
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <img src={result.qrDataUrl} alt="Share QR code" className="rounded-md border" />
+          <Row label="Recipient" value={providerLabel} />
+
+          {oneTime && (
+            <Alert>
+              <AlertDescription>
+                <strong>ONE-TIME ACCESS.</strong> This secure link can be used once. It also expires automatically if unused.
+              </AlertDescription>
+            </Alert>
+          )}
+
           <div className="space-y-2">
             <Label>Secure link</Label>
-            <Input readOnly value={result.url} onFocus={(e) => e.currentTarget.select()} />
+            <div className="flex gap-2">
+              <Input readOnly value={result.url} onFocus={(e) => e.currentTarget.select()} />
+              <Button type="button" variant="secondary" onClick={copyLink}>
+                {copied ? "Copied" : "Copy secure link"}
+              </Button>
+            </div>
           </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="ghost" onClick={() => setQrVisible((v) => !v)}>
+              {qrVisible ? "Hide QR" : "Show QR"}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              nativeButton={false}
+              render={
+                <a href={result.url} target="_blank" rel="noopener noreferrer">
+                  Open provider preview
+                </a>
+              }
+            />
+          </div>
+
+          {qrVisible && (
+            <div className="space-y-2">
+              <img src={result.qrDataUrl} alt="Share QR code" className="w-full max-w-[280px] rounded-md border sm:w-[280px]" />
+              <p className="text-xs text-muted-foreground">Doctor can scan this code to open the secure provider portal.</p>
+            </div>
+          )}
+
           <Alert>
             <AlertDescription>
               The decryption secret is in the URL fragment after <code>#</code> — it is never sent to the server.
@@ -371,15 +425,45 @@ export function ShareWizard() {
         <Card>
           <CardHeader>
             <CardTitle>Step 3 — Privacy review</CardTitle>
-            <CardDescription>MediKey data sharing label</CardDescription>
+            <CardDescription>Only selected information will be included in this share.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3 text-sm">
+          <CardContent className="space-y-4 text-sm">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="rounded-md border p-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">You are sharing</p>
+                <ul className="space-y-1">
+                  {docs
+                    .filter((d) => selectedDocs[d.id])
+                    .map((d) => (
+                      <li key={d.id}>
+                        {d.title_safe} <span className="text-muted-foreground">({selectedDocs[d.id]})</span>
+                      </li>
+                    ))}
+                  {Object.entries(selectedDatasets).map(([id, metrics]) => (
+                    <li key={id}>
+                      {datasets.find((d) => d.id === id)?.name} <span className="text-muted-foreground">({Array.from(metrics).join(", ")})</span>
+                    </li>
+                  ))}
+                  {selectedDocCount === 0 && selectedVitalsDatasetCount === 0 && (
+                    <li className="text-muted-foreground">Nothing selected</li>
+                  )}
+                </ul>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Not shared</p>
+                <ul className="space-y-1 text-muted-foreground">
+                  <li>{notSharedDocCount} other document(s)</li>
+                  <li>{Math.max(notSharedMetricCount, 0)} other vital metric selection(s)</li>
+                </ul>
+              </div>
+            </div>
+
             <Row label="Recipient" value={providerLabel} />
-            <Row label="Data shared" value={`${selectedDocCount} document(s), ${selectedMetricCount} vital metric(s)`} />
-            <Row label="Direct personal identifiers" value={directIdentifierCount === 0 ? "None" : `${directIdentifierCount} document(s) at original fidelity`} />
-            <Row label="Download permission" value="Not provided by app" />
+            <Row label="Documents" value={String(selectedDocCount)} />
+            <Row label="Vitals" value={selectedMetricCount > 0 ? `${selectedMetricCount} metric(s)` : "None"} />
+            <Row label="Direct identifiers" value={directIdentifierCount === 0 ? "None" : `${directIdentifierCount} document(s) at original fidelity`} />
+            <Row label="Access" value="Read only" />
             <Row label="AI processing" value="Disabled" />
-            <Row label="Access mode" value="Read-only" />
             <div className="flex justify-between pt-2">
               <Button variant="ghost" onClick={() => setStep(2)}>
                 Back
@@ -415,9 +499,33 @@ export function ShareWizard() {
                 <Input type="datetime-local" onChange={(e) => setCustomExpiry(new Date(e.target.value).toISOString())} />
               )}
             </div>
-            <div className="flex items-center gap-3">
-              <Switch checked={oneTime} onCheckedChange={setOneTime} id="one-time" />
-              <Label htmlFor="one-time">One-time access (claimed by the first retrieval)</Label>
+            <div className="space-y-2">
+              <Label>Access type</Label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => setOneTime(false)}
+                  className={`rounded-md border p-3 text-left text-sm ${!oneTime ? "border-primary bg-secondary/40" : ""}`}
+                >
+                  <p className="font-medium">Standard temporary access</p>
+                  <p className="text-xs text-muted-foreground">Can be opened repeatedly until it expires or is revoked.</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOneTime(true)}
+                  className={`rounded-md border p-3 text-left text-sm ${oneTime ? "border-primary bg-secondary/40" : ""}`}
+                >
+                  <p className="font-medium">One-time access</p>
+                  <p className="text-xs text-muted-foreground">Becomes unavailable after its first successful access.</p>
+                </button>
+              </div>
+              {oneTime && (
+                <Alert>
+                  <AlertDescription>
+                    This link becomes unavailable after its first successful access. Expiry still applies as an additional safety limit.
+                  </AlertDescription>
+                </Alert>
+              )}
             </div>
             <div className="flex justify-between">
               <Button variant="ghost" onClick={() => setStep(3)}>
