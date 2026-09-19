@@ -230,4 +230,3 @@ $$;
 
 revoke all on function public.claim_share_access(uuid) from public, anon, authenticated;
 grant execute on function public.claim_share_access(uuid) to service_role;
-
