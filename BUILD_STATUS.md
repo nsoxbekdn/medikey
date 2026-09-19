@@ -64,6 +64,32 @@ See `docs/DEPLOYMENT.md`. Target: GitHub → Vercel → existing Supabase.
 | Vitals verified in prod | ⬜ |
 | Known deployment issues | CSP uses `'unsafe-inline'` for script/style (no nonce pipeline). Provider page reload after decrypt needs the original link (fragment is intentionally removed). |
 
+## Performance optimization (2026-09-19)
+
+Full audit + 11-phase optimization pass. Details, before/after measurements, and security-regression notes in `PERFORMANCE.md`.
+
+| Phase | Status |
+|---|---|
+| 1. Vitals chart rendering (downsampling, memoization) | ✅ PASS — 5k-row dataset viewer: hang/>45s → 456ms; 50k rows render instantly |
+| 2. Byte-native crypto (no base64 for large blobs) | ✅ PASS — 325ms/10MB eliminated per document/vitals op |
+| 3. SSR auth dedup (`getClaims()` + `React.cache()`) | ✅ PASS — single-query pages 1.1-1.7s → ~290-330ms |
+| 4. Query waterfall parallelization | ✅ PASS — dashboard/share-wizard/vitals-viewer reads run concurrently |
+| 5. Document save (parallel encrypt+upload, `save_document` RPC) | ✅ PASS — 3 sequential inserts → 1 atomic RPC |
+| 6. Vitals save (`getSession()`, parallel encrypt) | ✅ PASS |
+| 7. Provider access refactor (`claim_share_access` RPC + signed URLs) | ✅ PASS — migration applied live, full security regression run (see below) |
+| 8. Share creation N+1 (bulk wrapper query, bounded vitals concurrency) | ✅ PASS |
+| 9. CSV worker (off-main-thread parse/normalize) | ✅ PASS — 50k rows: 0 long tasks recorded, main thread never blocks |
+| 10. PDF bounded-concurrency extraction + progress | ✅ PASS — 3.6s → 2.6-2.7s (corrects an earlier unverified 283ms claim; see PERFORMANCE.md) |
+| 11. Bundle/lazy-loading audit | ✅ PASS — Recharts/QR/pdfjs confirmed absent from non-chart routes and document-only provider shares in a fresh production build |
+
+**Live migration**: `supabase/migrations/0004_provider_access.sql` applied to the hosted project via the SQL editor. Verified: `claim_share_access` execute is `service_role`-only (anon call → 401); anon REST/storage access to all patient tables and the bucket remain empty/denied.
+
+**Security regression** (all re-run this session against the hosted project, synthetic data only): ciphertext-only storage ✅ · wrong-key/wrong-secret clean failure, no fallback plaintext ✅ · sanitization leakage-free (Patient Name/Phone/etc. redacted) ✅ · selective vitals (only shared metrics ever leave, verified via network inspection) ✅ · expired share → 403 (derived from `expires_at`, not the stale `status` column) ✅ · revoked share → 403 ✅ · one-time share: 5 concurrent claims → exactly 1 success, 4× `403 CONSUMED` (atomic row-lock, no race) ✅ · RLS: anon gets `[]`/404 on every table and the bucket ✅ · service-role key never in client bundle, `server-only` import guard in place ✅.
+
+**Known deviation**: the interrupted session's handoff claimed 283ms for the 120-page PDF phase; this could not be reproduced (measured 2.6-2.7s, a real ~25-30% improvement over the 3.6s baseline) and the false number was corrected rather than carried forward.
+
+**Not done / deliberately left**: Supabase region migration (ap-southeast-2 RTT is the largest remaining lever; explicitly the owner's infrastructure call, not attempted here). No architecture, security posture, or UI redesign changes were made as part of this pass.
+
 ## Next task
 
 Add the AI Copilot UI (`/vault/[id]` → "Explain this report") with the sanitized-preview confirmation step, wired to the existing `/api/ai/query`.

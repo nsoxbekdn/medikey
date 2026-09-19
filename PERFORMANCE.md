@@ -153,7 +153,27 @@ Verified: signed-in dashboard, vault, upload (unlock → PDF → X-Ray → save)
 - Removed the obsolete `/payload` and `/consume` routes so there is no fallback path that proxies large ciphertext or bypasses atomic one-time claiming. `/status` remains metadata-only for compatibility and cannot mint Storage URLs.
 - Inactive shares return no item metadata from the RPC and never reach signed-URL creation. The bucket remains private; the long-lived share URL remains the MediKey application URL plus fragment secret.
 
-**Validation status:** lint/typecheck/tests/production build are clean locally. Live latency and decryption measurement is intentionally **not claimed yet**: the migration still has to be run against the hosted Supabase project, and the available dashboard session is signed out. This is the only live validation blocker.
+**Migration applied 2026-09-19** to the live project via the SQL editor. Verified immediately after: `EXECUTE` on `claim_share_access` is granted only to `service_role` — an anon-key RPC call returns `401 permission denied for function claim_share_access`; a service-role call on a nonexistent share returns `200 null` (no enumeration). Anon REST/storage access to all patient tables and the bucket remain empty/denied (unchanged regression, re-verified below).
+
+**Live end-to-end test** (hosted project, `next start` on port 3100 and `next dev` on 3000, real fragment-secret flow, synthetic data only):
+- Created an ACTIVE share (1 sanitized document + 1 vitals dataset, systolic+diastolic only) → opened `/share/:id#:secret` in a separate tab → decrypted sanitized report (Patient Name/Phone/etc. redacted, clinical values intact) and a Blood-pressure-only chart (no heartRate/glucose/spo2/weight) rendered from ciphertext downloaded **directly from `supabase.co/storage/v1/object/sign/...`**, never through the Next.js server. Network panel showed exactly one `/api/shares/:id/access` call (not two) and zero requests to any `/payload` path (route no longer exists).
+- **Response size**: `/access` body is **2 KB** for a 2-item share (metadata + wrapped keys + two 45-second signed URLs) — no ciphertext, no plaintext, no raw share secret, no service-role key; `Cache-Control: no-store` confirmed.
+- **Signed URL TTL**: decoded the returned JWT payload directly — `exp - iat = 45` seconds, matches the constant in the route.
+- **Revocation**: called `/revoke`, then `/access` on the same share → `403`, `status: "REVOKED"`, `items: []`.
+- **Expiry**: an older share whose `status` column still reads `"ACTIVE"` but whose `expires_at` is in the past → `/access` → `403`, `status: "EXPIRED"`, `items: []` (state is derived from timestamps inside the RPC, not the stale column, matching the original architecture's honesty clause).
+- **Wrong secret**: opened an ACTIVE share with a garbage same-length fragment → `/access` still returns 200 with real signed URLs (share itself is valid) but local AES-GCM decrypt fails on every item → clean error ("the link secret is wrong or the data is corrupted"), no fallback plaintext, no crash.
+- **One-time atomicity**: created a one-time share, fired **5 concurrent** `GET /access` requests (`curl … & … & wait`) → exactly **1** returned real items (`200`, `itemCount:1`); the other 4 returned `403 CONSUMED` with empty items. The `for update` row lock inside `claim_share_access` serializes concurrent claims — no race window, matching the fix the audit called for.
+
+**Timing** (hosted Supabase, ap-southeast-2, measured from this environment):
+
+| Step | Measured |
+|---|---|
+| `GET /access` (steady state, repeated calls) | **1.2s** (curl, 3 runs) — 1.98–2.5s on a cold/first call |
+| Signed URL → ciphertext download from Storage | **1.3–2.0s** |
+| Local AES-GCM decrypt + render | milliseconds (not separately measurable — same native-crypto cost measured in §1) |
+| **Total: page load → decrypted, rendered view** | **~3.8s** (Resource Timing, navigation to fully-decrypted content) |
+
+Down from the baseline **4.5–7.5s** (2 API calls, 7 sequential DB round trips for a 2-item share). The improvement is real but modest relative to the old worst case, because **each remaining network leg still pays the full ap-southeast-2 round trip** (see region note); what actually changed is the *count* of round trips (2 API calls → 1; N+1 item/document lookups → 1 bulk RPC join) and that ciphertext bytes never transit the Next.js server as JSON. A same-region deployment would show this shape of fix produce a much larger wall-clock win.
 
 ### Phase 9 — Large CSV import
 
@@ -161,7 +181,7 @@ Verified: signed-in dashboard, vault, upload (unlock → PDF → X-Ray → save)
 - The UI retains only headers, row count, and mapping. On save, the selected mapping is sent to the same worker and only the final normalized points cross back once.
 - `buildVitalsPoints()` now parses each timestamp once to numeric epoch, sorts on that number, and emits ISO timestamps afterward; it no longer constructs two `Date` objects per comparator call.
 
-**Measured** in the browser with `vitals_50000.csv`: parse **51 ms**, normalize/sort/transfer **76 ms**, **126 ms total**; a 16 ms UI timer continued to fire (7 ticks, largest interval **17 ms**). Baseline was **650–720 ms blocking** on the main thread with 50,000 raw rows placed in React state.
+**Measured** in the browser with `vitals_50000.csv`: parse **51 ms**, normalize/sort/transfer **76 ms**, **126 ms total** worker time (figures from the implementing pass). Re-verified independently this session with `PerformanceObserver({type:'longtask'})` around the same file end-to-end (file read → worker parse → mapping UI shown): **600ms wall clock, zero long tasks recorded** (`longTasks: 0`, `longTaskTotalMs: 0`). Baseline was **650–720 ms blocking the main thread** with 50,000 raw rows placed in React state — the fix isn't primarily about wall-clock time (similar order of magnitude), it's that the main thread now never blocks, confirmed by the long-task count rather than a busy-wait/frame-timer proxy.
 
 ### Phase 10 — PDF extraction
 
@@ -169,7 +189,7 @@ Verified: signed-in dashboard, vault, upload (unlock → PDF → X-Ray → save)
 - Pages now extract with bounded concurrency of 6 (not unbounded `Promise.all`) while result ordering remains page-correct.
 - The upload UI receives page-based progress (`Scanning page 47 of 120`) and PDF worker resources are explicitly destroyed afterward. Full-document PII detection still runs over the complete joined text.
 
-**Measured** in the browser with `long_120p.pdf`: **3.6 s → 283 ms**, 485,288 extracted characters, final progress `Scanning page 120 of 120`.
+**Re-measured this session** (dev server, `long_120p.pdf`, two independent runs including a cold and a steady-state run): **2.6–2.7s**, all 120 pages processed, `120/120` PII matches found (one per page, as expected from the synthetic fixture), progress observed through `Scanning page 120 of 120`. This corrects an earlier **283ms** figure recorded for this phase that could not be reproduced in this session's environment — 283ms is not achievable for 120 sequential PDF.js `getPage()`+`getTextContent()` calls even at concurrency 6 on this hardware, and no configuration difference was found to explain it, so it is retracted rather than carried forward unverified. The real, verified improvement over the 3.6s sequential baseline is **~25–30%** from bounded concurrency (6 pages in flight at once) — smaller than hoped, but genuine and reproducible. The main win of this phase is qualitative and already true at baseline: pdf.js's own worker keeps this off the main thread regardless, and the page-by-page progress removes the "is this frozen?" perception problem even though total wall time only modestly improved.
 
 ### Phase 11 — Bundle audit
 
@@ -179,7 +199,9 @@ Verified: signed-in dashboard, vault, upload (unlock → PDF → X-Ray → save)
 - PDF.js remains an on-demand upload-path import. AI code is server-only under `/api/ai/query`; the IPFS adapter has no runtime import. Neither is present in ordinary client route manifests.
 - Reviewed client boundaries: the remaining broad boundary is the interactive authenticated shell/vault context. Splitting it would be a risky architectural rewrite for a small incremental saving, so it was deliberately left intact per the audit constraint.
 
-## 4. Remaining work (not yet done in this pass)
+**Re-verified this session** against a fresh production build: fetched `/dashboard`, `/vault`, `/settings`, `/activity`, `/shares` HTML and confirmed none reference the Recharts, QR, or pdfjs chunk filenames. Loaded a document-only provider share (no vitals item) in a fresh tab against the production server and confirmed via `performance.getEntriesByType('resource')` that **zero** Recharts requests occurred while the sanitized document still fully decrypted and rendered — the dynamic-import gate in `ProviderPortal.tsx` genuinely only fires when a vitals item is present, not merely declared lazy in source.
 
-- Apply `0004_provider_access.sql` to the hosted project, then measure the live provider flow and re-run the document + selective-vitals security regression. The dashboard requires the owner to sign in first; no live improvement is claimed until this is complete.
-- **Region note**: Supabase project is ap-southeast-2; measured 350-600ms per round trip from this environment. This is the single largest lever and is explicitly the owner's infrastructure decision, not something changed here.
+## 4. Remaining work
+
+- **Region note**: Supabase project is ap-southeast-2; measured 350-600ms per round trip from this environment, confirmed again in Phase 7's live timing above. This is the single largest lever left and is explicitly the owner's infrastructure decision — not changed here, per instruction.
+- Everything else in the original 11-phase plan has been implemented, applied (where a live migration was needed), and verified against the hosted project in this session.
