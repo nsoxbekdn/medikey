@@ -13,8 +13,9 @@ import { ProviderDocumentPreview } from "./ProviderDocumentPreview";
 import { Check, Clock, FileText, Info, Lock, Shield, Users } from "lucide-react";
 import { VitalsPoint } from "@/lib/db/types";
 import { getDocumentPreviewKind, type DocumentPreviewKind } from "@/lib/provider/documentPreview";
+import { parseProviderVitalsPayload } from "@/lib/provider/vitals";
 
-type VitalsChartsComponent = typeof import("@/components/vitals/VitalsCharts").VitalsCharts;
+type ProviderVitalsComponent = typeof import("./ProviderVitalsSection").ProviderVitalsSection;
 
 interface StatusResponse {
   shareId: string;
@@ -102,7 +103,7 @@ export function ProviderPortal({ shareId }: { shareId: string }) {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [items, setItems] = useState<DecryptedItem[] | null>(null);
   const [error, setError] = useState<ScreenError | null>(null);
-  const [VitalsChartRenderer, setVitalsChartRenderer] = useState<VitalsChartsComponent | null>(null);
+  const [VitalsRenderer, setVitalsRenderer] = useState<ProviderVitalsComponent | null>(null);
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
   const started = useRef(false);
 
@@ -158,7 +159,7 @@ export function ProviderPortal({ shareId }: { shareId: string }) {
                     itemId: item.itemId,
                     kind: item.kind,
                     meta: item.meta,
-                    points: JSON.parse(bufToUtf8(plainBuf)),
+                    points: parseProviderVitalsPayload(bufToUtf8(plainBuf)),
                   };
                 }
                 const previewKind = getDocumentPreviewKind(item.kind, item.meta.mimeType);
@@ -192,8 +193,8 @@ export function ProviderPortal({ shareId }: { shareId: string }) {
         if (decrypted.some((item) => item.kind === "vitals")) {
           // A direct import here (instead of next/dynamic) prevents Next from
           // preloading Recharts for document-only provider shares.
-          const chartModule = await import("@/components/vitals/VitalsCharts");
-          setVitalsChartRenderer(() => chartModule.VitalsCharts);
+          const vitalsModule = await import("./ProviderVitalsSection");
+          setVitalsRenderer(() => vitalsModule.ProviderVitalsSection);
         }
         const firstDoc = decrypted.find((item) => item.kind !== "vitals");
         if (firstDoc) setActiveDocId(firstDoc.itemId);
@@ -269,7 +270,7 @@ export function ProviderPortal({ shareId }: { shareId: string }) {
               {documents.length > 0 && (
                 <div className="rounded-xl border border-border bg-card p-6">
                   <div className="flex items-center justify-between">
-                    <h2 className="text-lg font-semibold text-foreground">Clinical document</h2>
+                    <h2 className="text-lg font-semibold text-foreground">Clinical documents</h2>
                   </div>
                   {documents.length > 1 && (
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -314,11 +315,10 @@ export function ProviderPortal({ shareId }: { shareId: string }) {
                 </div>
               )}
 
-              {vitalsItems.length > 0 && VitalsChartRenderer && (
+              {vitalsItems.length > 0 && VitalsRenderer && (
                 <div className="space-y-4">
-                  <h2 className="text-lg font-semibold text-foreground">Shared vitals</h2>
                   {vitalsItems.map((item) => (
-                    <VitalsChartRenderer key={item.itemId} points={item.points ?? []} />
+                    <VitalsRenderer key={item.itemId} points={item.points ?? []} />
                   ))}
                 </div>
               )}
