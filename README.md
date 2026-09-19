@@ -31,6 +31,7 @@ Medical data is fragmented across labs, hospitals and wearables, is deeply sensi
 | Consent receipt, data-sharing "nutrition label" | ✅ |
 | Access log timeline (no keys / plaintext ever logged) | ✅ |
 | Technical breach demo (feature-flagged; absent from customer navigation) | ✅ |
+| Longitudinal health timeline + "what changed" comparison | ✅ |
 | AI Health Copilot | 🟡 mock provider + sanitized-RAG scaffolding |
 | IPFS storage | 🟡 interface + stub adapter |
 | Research mode, emergency card, relationship graph | ⬜ future scope |
@@ -145,7 +146,7 @@ Apply all files in `supabase/migrations` in numeric order (Supabase CLI migratio
 | `SUPABASE_SERVICE_ROLE_KEY` | **server only** | provider-portal routes, audit writes |
 | `AI_PROVIDER`, `AI_API_KEY` | server only | optional; mock used when empty |
 | `IPFS_PROVIDER`, `IPFS_API_TOKEN` | server only | optional; stub when empty |
-| `NEXT_PUBLIC_ENABLE_DEMO_SECURITY_VIEW` | client | `true` shows `/demo/security` |
+| `NEXT_PUBLIC_ENABLE_DEMO_SECURITY_VIEW` | client | `true` shows `/demo-security` |
 
 ### Local development
 
@@ -184,6 +185,10 @@ Vercel + hosted Supabase. Set the env vars above in Vercel (service-role and AI 
 **Mitigated / reduced:** database breach, object-storage breach, accidental over-sharing, stale share links, broad provider access, raw PII sent to AI, identifier leakage through sanitized derivatives (verified before save).
 
 **Out of scope / not solved:** compromised patient or provider device, malicious browser extensions, screenshots or copying of viewed data, traffic-analysis metadata, perfect de-identification, formal regulatory compliance, recovery of a forgotten vault passphrase.
+
+## Security Demonstration
+
+A developer/judge-only technical artifact — a simulated server breach against this account's own real ciphertext — is intentionally kept outside the patient-facing product (no sidebar entry, no dashboard/settings link). See [docs/security-demo.md](docs/security-demo.md) for what it shows and what it does not claim.
 
 ## Security limitations
 

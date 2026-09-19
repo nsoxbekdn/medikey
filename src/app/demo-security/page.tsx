@@ -1,25 +1,34 @@
+import { redirect } from "next/navigation";
 import { createSupabaseServerClient, getVerifiedUser } from "@/lib/db/server";
 import { DocumentRow, ShareRow } from "@/lib/db/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 
-export default async function BreachSimulatorPage() {
+// Deliberately outside the (app) route group: no sidebar, not linked from any
+// customer nav/dashboard/settings surface. Judge/developer-only technical
+// artifact — see docs/security-demo.md.
+export default async function TechnicalSecurityDemoPage() {
   if (process.env.NEXT_PUBLIC_ENABLE_DEMO_SECURITY_VIEW !== "true") {
     return (
-      <Alert>
-        <AlertDescription>The breach simulator is disabled in this environment.</AlertDescription>
-      </Alert>
+      <main className="mx-auto max-w-2xl px-4 py-16">
+        <Alert>
+          <AlertDescription>The technical security demonstration is disabled in this environment.</AlertDescription>
+        </Alert>
+      </main>
     );
   }
 
-  const supabase = await createSupabaseServerClient();
   const user = await getVerifiedUser();
+  if (!user) redirect("/auth/sign-in");
+
+  const supabase = await createSupabaseServerClient();
   const { data: documents } = await supabase
     .from("documents")
     .select("*")
-    .eq("owner_id", user!.id)
+    .eq("owner_id", user.id)
     .limit(3);
-  const { data: shares } = await supabase.from("shares").select("*").eq("owner_id", user!.id).limit(3);
+  const { data: shares } = await supabase.from("shares").select("*").eq("owner_id", user.id).limit(3);
 
   // Owner-scoped RLS download of the real stored bytes: shows judges genuine
   // ciphertext, not a mock string.
@@ -32,10 +41,14 @@ export default async function BreachSimulatorPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
+    <main className="mx-auto max-w-3xl space-y-6 px-4 py-10">
+      <div className="space-y-2">
+        <Badge variant="outline">Technical Security Demonstration</Badge>
         <h1 className="text-2xl font-semibold">Simulated server breach</h1>
-        <p className="text-muted-foreground">Simulation / educational view. Real encryption is not weakened for this page.</p>
+        <p className="text-muted-foreground">
+          Developer/judge artifact, not part of the patient product. Simulation using this account&apos;s own synthetic
+          data — real encryption is not weakened for this page.
+        </p>
       </div>
 
       <Card>
@@ -45,7 +58,7 @@ export default async function BreachSimulatorPage() {
         <CardContent className="space-y-4 font-mono text-xs">
           <div>
             <p className="text-muted-foreground">Account ID</p>
-            <p className="break-all">{user?.id}</p>
+            <p className="break-all">{user.id}</p>
           </div>
           {((documents as DocumentRow[] | null) ?? []).map((doc) => (
             <div key={doc.id} className="space-y-1 border-t pt-3">
@@ -73,6 +86,6 @@ export default async function BreachSimulatorPage() {
           ))}
         </CardContent>
       </Card>
-    </div>
+    </main>
   );
 }

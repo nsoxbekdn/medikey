@@ -26,7 +26,7 @@ Nothing else. No Docker, no Express, no Cloudflare, no second DB.
 | `NEXT_PUBLIC_SUPABASE_URL` | Yes | Production + Preview | Yes | Supabase project URL (browser + server clients, CSP `connect-src`) |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes | Production + Preview | Yes | Supabase **publishable** key (`sb_publishable_…`) for the browser/cookie clients — RLS-bound |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Production + Preview (trusted repo only) | **NO** | Supabase **secret** key (`sb_secret_…`) for provider-portal routes; `server-only` import guards it |
-| `NEXT_PUBLIC_ENABLE_DEMO_SECURITY_VIEW` | No (default off) | Technical demo only | Yes | `true` enables the standalone `/demo/security` judge view; it is absent from customer navigation |
+| `NEXT_PUBLIC_ENABLE_DEMO_SECURITY_VIEW` | No (default off) | Production + Preview | Yes | `true` enables the standalone `/demo-security` judge view; it is absent from customer navigation |
 | `AI_API_KEY` | No | — | No | Unset ⇒ mock AI provider (clearly labelled). Server-only. |
 | `AI_PROVIDER`, `IPFS_PROVIDER`, `IPFS_API_TOKEN` | No | — | No | Listed in `.env.example`; **not read by any code yet**. Leave unset. |
 
@@ -81,4 +81,4 @@ Vault: onboarding · unlock · refresh ⇒ locked · no key in console
 Upload: `public/demo/sample_lab_report.txt` → X-Ray finds identifiers → sanitized preview → Encrypt & save → appears in `/vault`
 Vitals: `public/demo/vitals_demo.csv` → auto-mapped → chart + stats
 Share: create → URL is `https://<project>.vercel.app/share/<uuid>#<secret>` → QR encodes same URL → Network tab shows no `#…` in any request → open in incognito/phone → decrypts selected items only, address bar loses the fragment
-Security: revoke ⇒ provider refresh `ACCESS REVOKED` (API 403) · expired ⇒ 403 · one-time second open ⇒ 403 · wrong fragment ⇒ clean error · technical demo `/demo/security` (only when explicitly enabled) shows ciphertext bytes · `curl -sI https://<project>.vercel.app/share/x | grep -i content-security`
+Security: revoke ⇒ provider refresh `ACCESS REVOKED` (API 403) · expired ⇒ 403 · one-time second open ⇒ 403 · wrong fragment ⇒ clean error · technical demo `/demo-security` (only when explicitly enabled) shows ciphertext bytes · `curl -sI https://<project>.vercel.app/share/x | grep -i content-security`

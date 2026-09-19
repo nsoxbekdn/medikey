@@ -21,7 +21,10 @@ export default async function VitalsPage() {
           <h1 className="text-2xl font-semibold">Vitals</h1>
           <p className="text-muted-foreground">Time-series datasets, decrypted only in your browser.</p>
         </div>
-        <Button nativeButton={false} render={<Link href="/vitals/import">Import Vitals</Link>} />
+        <div className="flex gap-2">
+          <Button variant="secondary" nativeButton={false} render={<Link href="/vitals/timeline">Health Timeline</Link>} />
+          <Button nativeButton={false} render={<Link href="/vitals/import">Import Vitals</Link>} />
+        </div>
       </div>
 
       {datasets.length === 0 ? (

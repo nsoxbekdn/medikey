@@ -11,7 +11,7 @@ Prep: signed-in patient with an unlocked vault in tab A; a second browser/incogn
 | 1:20–1:45 | `/shares/new` | Recipient "Dr. Mehta", purpose "Second opinion". Choose **Sanitized** report + **systolic, diastolic only**. Privacy label shows *Direct identifiers: None*. Duration **10 minutes**. Create → QR + link. "The secret after `#` never reaches the server." |
 | 1:45–2:10 | tab B: open the link | Countdown, READ ONLY badge, sanitized report, BP chart only — no glucose/weight. "Decrypted inside this browser." |
 | 2:10–2:30 | tab A `/shares` → **Revoke Access**; tab B refresh | **ACCESS REVOKED**. "The API returned 403 — it's enforced server-side, not hidden in the UI." |
-| 2:30–2:45 | `/demo/security` | "This is what a full DB + storage breach exposes: an opaque path, a hash, 32 bytes of ciphertext. No plaintext, no keys, no share secret." |
+| 2:30–2:45 | `/demo-security` (judge-only, not in customer nav) | "This is what a full DB + storage breach exposes: an opaque path, a hash, 32 bytes of ciphertext. No plaintext, no keys, no share secret." |
 | 2:45–3:00 | README architecture | "Same pattern extends to sanitized-RAG AI and encrypted IPFS. MediKey doesn't just protect a file — it lets the patient control what is shared, with whom, for what purpose, and for how long." |
 
 Backup: `/activity` shows the full audit timeline if a step is questioned.
