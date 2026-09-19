@@ -15,7 +15,6 @@ import {
   Share2,
   Activity,
   Settings,
-  ShieldAlert,
   LogOut,
   X,
 } from "lucide-react";
@@ -27,7 +26,6 @@ const NAV = [
   { href: "/vitals", label: "Vitals", icon: LineChart },
   { href: "/shares", label: "Shares", icon: Share2 },
   { href: "/activity", label: "Activity", icon: Activity },
-  { href: "/demo/security", label: "Breach Simulator", icon: ShieldAlert },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
