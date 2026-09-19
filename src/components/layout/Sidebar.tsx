@@ -4,12 +4,9 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/db/client";
 import { cn } from "@/lib/utils";
-import { useVault } from "@/lib/vault/VaultProvider";
 import {
   ChevronLeft,
   ChevronRight,
-  Lock,
-  LockOpen,
   LayoutDashboard,
   FolderLock,
   LineChart,
@@ -42,7 +39,6 @@ export function Sidebar({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { unlocked, lock } = useVault();
 
   async function signOut() {
     const supabase = createSupabaseBrowserClient();
@@ -58,13 +54,13 @@ export function Sidebar({
     <div
       className={cn(
         "relative flex h-full flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-200 ease-out",
-        collapsed ? "w-[72px]" : "w-[248px]",
+        collapsed ? "w-[72px]" : "w-[240px]",
       )}
     >
-      <div className={cn("flex h-[76px] items-center", collapsed ? "justify-center px-3" : "justify-between px-5")}>
+      <div className={cn("flex h-[94px] items-center", collapsed ? "justify-center px-3" : "justify-between px-6")}>
         <Link href="/dashboard" className="flex min-w-0 items-center gap-2.5" title={collapsed ? "MediKey" : undefined}>
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground">M</div>
-          {!collapsed && <div className="text-[17px] font-semibold tracking-tight text-primary">MediKey</div>}
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue text-xl font-semibold text-white">+</div>
+          {!collapsed && <div><div className="text-xl font-semibold tracking-tight text-primary">MediKey</div><div className="mt-0.5 text-[11px] text-muted-foreground">Your health. In your hands.</div></div>}
         </Link>
         {onClose && (
           <button onClick={onClose} className="rounded-md p-1 text-muted-foreground hover:bg-muted md:hidden" aria-label="Close menu">
@@ -77,7 +73,7 @@ export function Sidebar({
         <button
           type="button"
           onClick={() => onCollapsedChange(!collapsed)}
-          className="absolute -right-3 top-[84px] z-10 flex h-6 w-6 items-center justify-center rounded-full border border-sidebar-border bg-card text-muted-foreground shadow-sm transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="absolute -right-3 top-[104px] z-10 flex h-6 w-6 items-center justify-center rounded-full border border-sidebar-border bg-card text-muted-foreground shadow-sm transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
@@ -85,7 +81,7 @@ export function Sidebar({
         </button>
       )}
 
-      <nav className={cn("flex flex-1 flex-col gap-1", collapsed ? "px-2.5" : "px-3")} aria-label="Primary navigation">
+      <nav className={cn("flex flex-1 flex-col gap-2 pt-7", collapsed ? "px-2.5" : "px-3.5")} aria-label="Primary navigation">
         {NAV.map((item) => {
           const Icon = item.icon;
           const active = pathname === item.href || pathname.startsWith(item.href + "/");
@@ -97,8 +93,8 @@ export function Sidebar({
               title={collapsed ? item.label : undefined}
               aria-label={collapsed ? item.label : undefined}
               className={cn(
-                "group relative flex h-10 items-center rounded-lg text-[13.5px] font-medium transition-colors duration-150",
-                collapsed ? "justify-center px-0" : "gap-3 px-3",
+                "group relative flex h-12 items-center rounded-lg text-[15px] font-medium transition-colors duration-150",
+                collapsed ? "justify-center px-0" : "gap-4 px-4",
                 active
                   ? "bg-sidebar-accent text-sidebar-accent-foreground"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -113,23 +109,6 @@ export function Sidebar({
       </nav>
 
       <div className={cn("border-t border-sidebar-border py-3", collapsed ? "px-2.5" : "px-3")}>
-        {!collapsed && <div className="flex items-start gap-2.5 rounded-md px-2.5 py-2">
-          {unlocked ? (
-            <LockOpen className="mt-0.5 h-4 w-4 text-success" strokeWidth={1.75} />
-          ) : (
-            <Lock className="mt-0.5 h-4 w-4 text-muted-foreground-soft" strokeWidth={1.75} />
-          )}
-          <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-medium text-foreground">Vault {unlocked ? "unlocked" : "locked"}</div>
-            <div className="truncate text-xs text-muted-foreground">Local only · You control your data</div>
-          </div>
-          {unlocked && (
-            <button onClick={lock} className="text-xs font-medium text-blue hover:underline">
-              Lock
-            </button>
-          )}
-        </div>}
-
         <div className={cn("mt-1 flex items-center rounded-md py-2", collapsed ? "justify-center px-0" : "gap-2.5 px-2.5")} title={collapsed ? displayName : undefined}>
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary text-[13px] font-semibold text-primary">
             {initial}
