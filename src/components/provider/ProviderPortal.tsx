@@ -70,7 +70,9 @@ export function ProviderPortal({ shareId }: { shareId: string }) {
 
         if (statusData.status !== "ACTIVE") return;
         if (!secret) {
-          setError("Missing decryption secret in the link. Ask the patient to resend the full URL.");
+          setError(
+            "Missing decryption secret. The secret lives only in the original link (after #) and is cleared from this page once read — open the link from the patient again.",
+          );
           return;
         }
         logEvent(shareId, "SHARE_OPENED");
@@ -83,6 +85,8 @@ export function ProviderPortal({ shareId }: { shareId: string }) {
           setError("The link secret looks corrupted.");
           return;
         }
+        // Key is in memory now; drop the fragment from the address bar / history.
+        history.replaceState(null, "", location.pathname);
 
         const payloadRes = await fetch(`/api/shares/${shareId}/payload`);
         if (!payloadRes.ok) {

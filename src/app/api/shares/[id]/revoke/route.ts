@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { shareIdSchema } from "@/lib/validation/schemas";
 import { createSupabaseServerClient, createSupabaseServiceClient } from "@/lib/db/server";
 
 export async function POST(_request: NextRequest, ctx: RouteContext<"/api/shares/[id]/revoke">) {
   const { id } = await ctx.params;
+  if (!shareIdSchema.safeParse(id).success) return NextResponse.json({ error: "Share not found." }, { status: 404 });
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { shareIdSchema } from "@/lib/validation/schemas";
 import { createSupabaseServiceClient } from "@/lib/db/server";
 import { deriveShareStatus } from "@/lib/sharing/status";
 
@@ -7,6 +8,7 @@ import { deriveShareStatus } from "@/lib/sharing/status";
 // screenshots or local copies of already-decrypted content.
 export async function POST(_request: NextRequest, ctx: RouteContext<"/api/shares/[id]/consume">) {
   const { id } = await ctx.params;
+  if (!shareIdSchema.safeParse(id).success) return NextResponse.json({ error: "Share not found." }, { status: 404 });
   const supabase = createSupabaseServiceClient();
 
   const { data: share } = await supabase.from("shares").select("*").eq("id", id).maybeSingle();

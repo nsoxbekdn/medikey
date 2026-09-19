@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
 
-  const body = await request.json();
+  const body = await request.json().catch(() => null);
   const parsed = createShareSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid share request.", details: parsed.error.flatten() }, { status: 400 });

@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { shareIdSchema } from "@/lib/validation/schemas";
 import { createSupabaseServiceClient } from "@/lib/db/server";
 import { deriveShareStatus } from "@/lib/sharing/status";
 
 export async function GET(_request: NextRequest, ctx: RouteContext<"/api/shares/[id]/status">) {
   const { id } = await ctx.params;
+  if (!shareIdSchema.safeParse(id).success) return NextResponse.json({ error: "Share not found." }, { status: 404 });
   const supabase = createSupabaseServiceClient();
 
   const { data: share } = await supabase.from("shares").select("*").eq("id", id).maybeSingle();

@@ -55,3 +55,6 @@ export const aiQuerySchema = z.object({
     .min(1)
     .max(20),
 });
+
+// Route params are untrusted; reject non-UUID share ids before they reach Postgres.
+export const shareIdSchema = z.string().uuid();

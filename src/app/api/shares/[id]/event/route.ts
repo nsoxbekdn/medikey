@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServiceClient } from "@/lib/db/server";
-import { accessEventSchema } from "@/lib/validation/schemas";
+import { accessEventSchema, shareIdSchema } from "@/lib/validation/schemas";
 
 // Safe, non-secret access events only. Never accepts or logs keys/plaintext.
 export async function POST(request: NextRequest, ctx: RouteContext<"/api/shares/[id]/event">) {
   const { id } = await ctx.params;
-  const body = await request.json();
+  if (!shareIdSchema.safeParse(id).success) return NextResponse.json({ error: "Share not found." }, { status: 404 });
+  const body = await request.json().catch(() => null);
   const parsed = accessEventSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "Invalid event." }, { status: 400 });
 

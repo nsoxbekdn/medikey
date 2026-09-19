@@ -1,3 +1,5 @@
+import "server-only";
+
 export interface HealthCopilotProvider {
   answer(input: {
     question: string;

@@ -45,6 +45,25 @@ Last verified: 2026-09-19 · `npm run lint` ✅ (4 cosmetic warnings) · `npm ru
 
 See README → *Security limitations* and *Threat model*.
 
+## Production Deployment
+
+See `docs/DEPLOYMENT.md`. Target: GitHub → Vercel → existing Supabase.
+
+| Item | Status |
+|---|---|
+| Deploy hardening (server-only guard, UUID param validation, security headers/CSP, no-store on `/api/*` + `/share/*`, fragment stripped after import, force-dynamic portal) | ✅ done, verified locally 2026-09-19 |
+| Secret scan of git history + client bundle | ✅ clean (no `sb_secret_` value, no `SUPABASE_SERVICE_ROLE_KEY` in `.next/static`) |
+| Local prod build / lint / typecheck / tests | ✅ |
+| GitHub repo pushed | ⬜ |
+| Vercel build status | ⬜ |
+| Deployed URL | ⬜ |
+| Supabase Site URL / Redirect URLs updated | ⬜ |
+| Production share flow verified (incognito) | ⬜ |
+| Production encryption verified (blob = ciphertext) | ⬜ |
+| Expiry 403 / revoke 403 / one-time 403 verified in prod | ⬜ |
+| Vitals verified in prod | ⬜ |
+| Known deployment issues | CSP uses `'unsafe-inline'` for script/style (no nonce pipeline). Provider page reload after decrypt needs the original link (fragment is intentionally removed). |
+
 ## Next task
 
 Add the AI Copilot UI (`/vault/[id]` → "Explain this report") with the sanitized-preview confirmation step, wired to the existing `/api/ai/query`.
