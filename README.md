@@ -26,7 +26,7 @@ Medical data is fragmented across labs, hospitals and wearables, is deeply sensi
 | Selective disclosure: documents (original / sanitized) + individual vital metrics | ✅ |
 | Fragment-secret share links (`/share/<id>#<secret>`), QR generated locally | ✅ |
 | Time-bound access (10m / 1h / 24h / 48h / custom), **enforced server-side** | ✅ |
-| Manual revocation, one-time (burn-after-read) links | ✅ |
+| Manual revocation, one-time access claims | ✅ |
 | Read-only provider portal with countdown, local decryption | ✅ |
 | Consent receipt, data-sharing "nutrition label" | ✅ |
 | Access log timeline (no keys / plaintext ever logged) | ✅ |
@@ -95,7 +95,7 @@ Every AES-GCM call uses a fresh random 12-byte IV stored alongside the ciphertex
 
 ### Time-bound access semantics
 
-Revocation and expiry block **future retrieval** of encrypted material. They cannot make a provider forget, un-see, screenshot, or delete data already decrypted in their browser. "One-time" means one successful retrieval session.
+Revocation and expiry block **future retrieval** of encrypted material. They cannot make a provider forget, un-see, screenshot, or delete data already decrypted in their browser. One-time access can be claimed once; the server does not cryptographically prove successful browser decryption before consumption.
 
 ### Vitals / time-series
 
