@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { VitalsDatasetRow, VitalsPoint } from "@/lib/db/types";
 import { useVault } from "@/lib/vault/VaultProvider";
 import { unwrapKey } from "@/lib/crypto/key-wrap";
-import { aesDecrypt } from "@/lib/crypto/aes";
-import { bufToUtf8, bufToBase64 } from "@/lib/crypto/encoding";
+import { aesDecryptBytes } from "@/lib/crypto/aes";
+import { bufToUtf8 } from "@/lib/crypto/encoding";
 import { createSupabaseBrowserClient } from "@/lib/db/client";
 import { VitalsCharts } from "./VitalsCharts";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -23,20 +23,16 @@ export function VitalsDatasetViewer({ dataset }: { dataset: VitalsDatasetRow }) 
     let cancelled = false;
     (async () => {
       try {
-        const key = await unwrapKey(vault.rootKey, {
-          ciphertext: dataset.wrapped_dataset_key,
-          iv: dataset.wrapping_iv,
-        });
         const supabase = createSupabaseBrowserClient();
-        const { data, error: dlErr } = await supabase.storage
-          .from("encrypted-blobs")
-          .download(dataset.encrypted_payload_path);
+        // Key unwrap (CPU) and blob download (network) are independent.
+        const [key, downloadRes] = await Promise.all([
+          unwrapKey(vault.rootKey, { ciphertext: dataset.wrapped_dataset_key, iv: dataset.wrapping_iv }),
+          supabase.storage.from("encrypted-blobs").download(dataset.encrypted_payload_path),
+        ]);
+        const { data, error: dlErr } = downloadRes;
         if (dlErr || !data) throw dlErr ?? new Error("Download failed.");
         const ciphertextBytes = new Uint8Array(await data.arrayBuffer());
-        const plainBuf = await aesDecrypt(key, {
-          ciphertext: bufToBase64(ciphertextBytes),
-          iv: dataset.encryption_iv,
-        });
+        const plainBuf = await aesDecryptBytes(key, { ciphertext: ciphertextBytes, iv: dataset.encryption_iv });
         if (!cancelled) setPoints(JSON.parse(bufToUtf8(plainBuf)));
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Decryption failed.");

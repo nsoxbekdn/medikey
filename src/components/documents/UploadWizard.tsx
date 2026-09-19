@@ -13,10 +13,10 @@ import { PIIMatch } from "@/lib/db/types";
 import { detectPII } from "@/lib/pii/detectors";
 import { sanitizeText, verifyNoLeakage } from "@/lib/pii/sanitizer";
 import { useVault } from "@/lib/vault/VaultProvider";
-import { generateAesKey, aesEncrypt } from "@/lib/crypto/aes";
+import { generateAesKey, aesEncryptBytes } from "@/lib/crypto/aes";
 import { wrapKey } from "@/lib/crypto/key-wrap";
 import { sha256Hex } from "@/lib/crypto/hash";
-import { base64ToBuf, utf8ToBuf } from "@/lib/crypto/encoding";
+import { utf8ToBuf } from "@/lib/crypto/encoding";
 import { createSupabaseBrowserClient } from "@/lib/db/client";
 import { toast } from "sonner";
 
@@ -88,72 +88,60 @@ export function UploadWizard({ onStepChange }: { onStepChange?: (index: number) 
         throw new Error("Sanitization verification failed — selected identifiers still present. Aborting save.");
       }
 
-      const originalBuf = new Uint8Array(await file.arrayBuffer());
-      const sha256 = await sha256Hex(originalBuf);
-
+      // Hashing, encryption and key wrapping are independent of each other and
+      // of the signed-in user lookup below — run them concurrently.
+      const [originalBuf, supabase] = [new Uint8Array(await file.arrayBuffer()), createSupabaseBrowserClient()];
       const documentKey = await generateAesKey();
-      const originalEncrypted = await aesEncrypt(documentKey, originalBuf);
-      const sanitizedEncrypted = await aesEncrypt(documentKey, utf8ToBuf(sanitized));
-      const wrappedKey = await wrapKey(vault.rootKey, documentKey);
-
-      setStatusMessage(STATUS_MESSAGES.uploading);
-      const supabase = createSupabaseBrowserClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const [sha256, originalEncrypted, sanitizedEncrypted, wrappedKey, userRes] = await Promise.all([
+        sha256Hex(originalBuf),
+        aesEncryptBytes(documentKey, originalBuf),
+        aesEncryptBytes(documentKey, utf8ToBuf(sanitized)),
+        wrapKey(vault.rootKey, documentKey),
+        supabase.auth.getUser(),
+      ]);
+      const user = userRes.data.user;
       if (!user) throw new Error("Not signed in.");
 
+      setStatusMessage(STATUS_MESSAGES.uploading);
       const originalPath = `${user.id}/${uuidv4()}`;
       const sanitizedPath = `${user.id}/${uuidv4()}`;
 
-      const { error: upErr1 } = await supabase.storage
-        .from("encrypted-blobs")
-        .upload(originalPath, base64ToBuf(originalEncrypted.ciphertext) as BlobPart, {
-          contentType: "application/octet-stream",
-        });
-      if (upErr1) throw upErr1;
+      // Ciphertext bytes go straight to Storage — no base64 round trip.
+      const [up1, up2] = await Promise.all([
+        supabase.storage
+          .from("encrypted-blobs")
+          .upload(originalPath, originalEncrypted.ciphertext as BlobPart, { contentType: "application/octet-stream" }),
+        supabase.storage
+          .from("encrypted-blobs")
+          .upload(sanitizedPath, sanitizedEncrypted.ciphertext as BlobPart, { contentType: "application/octet-stream" }),
+      ]);
+      if (up1.error) throw up1.error;
+      if (up2.error) throw up2.error;
 
-      const { error: upErr2 } = await supabase.storage
-        .from("encrypted-blobs")
-        .upload(sanitizedPath, base64ToBuf(sanitizedEncrypted.ciphertext) as BlobPart, {
-          contentType: "application/octet-stream",
-        });
-      if (upErr2) throw upErr2;
-
-      const { data: docRow, error: docErr } = await supabase
-        .from("documents")
-        .insert({
-          owner_id: user.id,
-          title_safe: file.name,
-          mime_type: file.type || "application/octet-stream",
-          encrypted_storage_path: originalPath,
-          encryption_iv: originalEncrypted.iv,
-          sha256_digest: sha256,
-          byte_size: file.size,
-          privacy_scan_completed: true,
-        })
-        .select()
-        .single();
-      if (docErr || !docRow) throw docErr ?? new Error("Failed to save document.");
-
-      const { error: wrapErr } = await supabase.from("document_key_wrappers").insert({
-        document_id: docRow.id,
-        owner_id: user.id,
-        wrapped_document_key: wrappedKey.ciphertext,
-        wrapping_iv: wrappedKey.iv,
-        wrapping_algorithm: "AES-GCM-256",
-      });
-      if (wrapErr) throw wrapErr;
-
+      // sanitizedSha256 doesn't depend on the uploads above — compute it
+      // while those network calls were in flight isn't possible here since we
+      // need it for the RPC below, but it's cheap (native SHA-256, ms-level).
       const sanitizedSha256 = await sha256Hex(utf8ToBuf(sanitized));
-      const { error: sanErr } = await supabase.from("sanitized_artifacts").insert({
-        document_id: docRow.id,
-        owner_id: user.id,
-        encrypted_storage_path: sanitizedPath,
-        encryption_iv: sanitizedEncrypted.iv,
-        sha256_digest: sanitizedSha256,
-      });
-      if (sanErr) throw sanErr;
+
+      // One RPC = one round trip, and documents/document_key_wrappers/
+      // sanitized_artifacts are inserted atomically server-side instead of
+      // three sequential client round trips.
+      const { data: docRow, error: docErr } = (await supabase
+        .rpc("save_document", {
+          p_title_safe: file.name,
+          p_mime_type: file.type || "application/octet-stream",
+          p_encrypted_storage_path: originalPath,
+          p_encryption_iv: originalEncrypted.iv,
+          p_sha256_digest: sha256,
+          p_byte_size: file.size,
+          p_wrapped_document_key: wrappedKey.ciphertext,
+          p_wrapping_iv: wrappedKey.iv,
+          p_sanitized_storage_path: sanitizedPath,
+          p_sanitized_encryption_iv: sanitizedEncrypted.iv,
+          p_sanitized_sha256: sanitizedSha256,
+        })
+        .single()) as { data: { id: string } | null; error: { message: string } | null };
+      if (docErr || !docRow) throw docErr ?? new Error("Failed to save document.");
 
       setStatusMessage(STATUS_MESSAGES.saved);
       setStep("done");

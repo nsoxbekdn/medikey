@@ -4,9 +4,9 @@ import { useState } from "react";
 import { DocumentRow, DocumentKeyWrapperRow, SanitizedArtifactRow } from "@/lib/db/types";
 import { useVault } from "@/lib/vault/VaultProvider";
 import { unwrapKey } from "@/lib/crypto/key-wrap";
-import { aesDecrypt } from "@/lib/crypto/aes";
+import { aesDecryptBytes } from "@/lib/crypto/aes";
 import { sha256Hex } from "@/lib/crypto/hash";
-import { bufToUtf8, bufToBase64 } from "@/lib/crypto/encoding";
+import { bufToUtf8 } from "@/lib/crypto/encoding";
 import { createSupabaseBrowserClient } from "@/lib/db/client";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -32,24 +32,21 @@ export function DocumentDetail({ document, wrapper, sanitized }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const documentKey = await unwrapKey(vault.rootKey, {
-        ciphertext: wrapper.wrapped_document_key,
-        iv: wrapper.wrapping_iv,
-      });
-
       const target = useSanitized && sanitized ? sanitized : document;
       const iv = useSanitized && sanitized ? sanitized.encryption_iv : document.encryption_iv;
       const path = useSanitized && sanitized ? sanitized.encrypted_storage_path : document.encrypted_storage_path;
 
       const supabase = createSupabaseBrowserClient();
-      const { data, error: dlErr } = await supabase.storage.from("encrypted-blobs").download(path);
+      // Key unwrap (CPU) and blob download (network) are independent.
+      const [documentKey, downloadRes] = await Promise.all([
+        unwrapKey(vault.rootKey, { ciphertext: wrapper.wrapped_document_key, iv: wrapper.wrapping_iv }),
+        supabase.storage.from("encrypted-blobs").download(path),
+      ]);
+      const { data, error: dlErr } = downloadRes;
       if (dlErr || !data) throw dlErr ?? new Error("Download failed.");
       const ciphertextBytes = new Uint8Array(await data.arrayBuffer());
 
-      const plainBuf = await aesDecrypt(documentKey, {
-        ciphertext: bufToBase64(ciphertextBytes),
-        iv,
-      });
+      const plainBuf = await aesDecryptBytes(documentKey, { ciphertext: ciphertextBytes, iv });
 
       if (!useSanitized) {
         const recomputed = await sha256Hex(plainBuf);

@@ -12,9 +12,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { parseVitalsCsv, buildVitalsPoints } from "@/lib/vitals/parse";
 import { VitalField, needsManualMapping } from "@/lib/vitals/normalize";
 import { useVault } from "@/lib/vault/VaultProvider";
-import { generateAesKey, aesEncrypt } from "@/lib/crypto/aes";
+import { generateAesKey, aesEncryptBytes } from "@/lib/crypto/aes";
 import { wrapKey } from "@/lib/crypto/key-wrap";
-import { utf8ToBuf, base64ToBuf } from "@/lib/crypto/encoding";
+import { utf8ToBuf } from "@/lib/crypto/encoding";
 import { createSupabaseBrowserClient } from "@/lib/db/client";
 import { toast } from "sonner";
 
@@ -57,19 +57,22 @@ export function VitalsUploadWizard() {
       if (points.length === 0) throw new Error("No valid rows after mapping — check date formats.");
 
       const datasetKey = await generateAesKey();
-      const encrypted = await aesEncrypt(datasetKey, utf8ToBuf(JSON.stringify(points)));
-      const wrapped = await wrapKey(vault.rootKey, datasetKey);
-
       const supabase = createSupabaseBrowserClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      // Encryption/wrapping and the session lookup are independent — the
+      // session is already held locally by the SDK, so this is not a network
+      // call (unlike auth.getUser(), which was one before this change).
+      const [encrypted, wrapped, sessionRes] = await Promise.all([
+        aesEncryptBytes(datasetKey, utf8ToBuf(JSON.stringify(points))),
+        wrapKey(vault.rootKey, datasetKey),
+        supabase.auth.getSession(),
+      ]);
+      const user = sessionRes.data.session?.user;
       if (!user) throw new Error("Not signed in.");
 
       const path = `${user.id}/${uuidv4()}`;
       const { error: upErr } = await supabase.storage
         .from("encrypted-blobs")
-        .upload(path, base64ToBuf(encrypted.ciphertext) as BlobPart, { contentType: "application/octet-stream" });
+        .upload(path, encrypted.ciphertext as BlobPart, { contentType: "application/octet-stream" });
       if (upErr) throw upErr;
 
       const { data: row, error: insErr } = await supabase

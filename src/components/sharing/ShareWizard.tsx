@@ -16,12 +16,18 @@ import { useVault } from "@/lib/vault/VaultProvider";
 import { createSupabaseBrowserClient } from "@/lib/db/client";
 import { DocumentRow, SanitizedArtifactRow, VitalsDatasetRow, VitalsPoint } from "@/lib/db/types";
 import { unwrapKey } from "@/lib/crypto/key-wrap";
-import { aesDecrypt, aesEncrypt, generateAesKey, exportAesKeyRaw } from "@/lib/crypto/aes";
-import { bufToBase64, base64ToBuf, bufToUtf8, utf8ToBuf } from "@/lib/crypto/encoding";
+import { aesDecryptBytes, aesEncrypt, aesEncryptBytes, generateAesKey, exportAesKeyRaw } from "@/lib/crypto/aes";
+import { bufToUtf8, utf8ToBuf } from "@/lib/crypto/encoding";
 import { generateShareSecret } from "@/lib/sharing/secret";
 import { buildShareUrl } from "@/lib/sharing/url";
 import { SHARE_DURATION_PRESETS } from "@/lib/sharing/status";
+import { mapWithConcurrency } from "@/lib/async/concurrency";
 import { toast } from "sonner";
+
+// Bounded, not unbounded Promise.all: caps how many decrypted vitals buffers
+// (and re-encryption jobs) are held in memory at once when a share includes
+// several datasets.
+const VITALS_SHARE_CONCURRENCY = 4;
 
 const VITAL_METRICS = ["systolic", "diastolic", "heartRate", "glucose", "spo2", "weight"] as const;
 
@@ -53,17 +59,21 @@ export function ShareWizard() {
     (async () => {
       const supabase = createSupabaseBrowserClient();
       const {
-        data: { user },
-      } = await supabase.auth.getUser();
+        data: { session },
+      } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) return;
-      const { data: documents } = await supabase.from("documents").select("*").eq("owner_id", user.id);
-      const { data: sanitizedArtifacts } = await supabase.from("sanitized_artifacts").select("*").eq("owner_id", user.id);
+      // Three independent reads — fetch concurrently instead of one after another.
+      const [{ data: documents }, { data: sanitizedArtifacts }, { data: vitalsData }] = await Promise.all([
+        supabase.from("documents").select("*").eq("owner_id", user.id),
+        supabase.from("sanitized_artifacts").select("*").eq("owner_id", user.id),
+        supabase.from("vitals_datasets").select("*").eq("owner_id", user.id),
+      ]);
       const merged: SelectableDoc[] = (documents ?? []).map((d) => ({
         ...(d as DocumentRow),
         sanitized: (sanitizedArtifacts as SanitizedArtifactRow[] | null)?.find((s) => s.document_id === d.id) ?? null,
       }));
       setDocs(merged);
-      const { data: vitalsData } = await supabase.from("vitals_datasets").select("*").eq("owner_id", user.id);
       setDatasets((vitalsData as VitalsDatasetRow[] | null) ?? []);
     })();
   }, []);
@@ -108,14 +118,15 @@ export function ShareWizard() {
     setBusy(true);
     setError(null);
     try {
-      const { key: shareSecretKey, secretB64Url } = await generateShareSecret();
       const supabase = createSupabaseBrowserClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const [{ key: shareSecretKey, secretB64Url }, sessionRes] = await Promise.all([
+        generateShareSecret(),
+        supabase.auth.getSession(),
+      ]);
+      const user = sessionRes.data.session?.user;
       if (!user) throw new Error("Not signed in.");
 
-      const items: Array<{
+      type ShareItemInput = {
         documentId?: string;
         sanitizedArtifactId?: string;
         vitalsDatasetId?: string;
@@ -124,40 +135,45 @@ export function ShareWizard() {
         wrappingIv: string;
         encryptedStoragePath?: string;
         encryptionIv?: string;
-      }> = [];
+      };
+      const items: ShareItemInput[] = [];
 
-      for (const [docId, mode] of Object.entries(selectedDocs)) {
-        const doc = docs.find((d) => d.id === docId);
-        if (!doc) continue;
-        const { data: wrapper } = await supabase
-          .from("document_key_wrappers")
-          .select("*")
-          .eq("document_id", docId)
-          .single();
-        const documentKey = await unwrapKey(vault.rootKey, {
-          ciphertext: wrapper.wrapped_document_key,
-          iv: wrapper.wrapping_iv,
-        });
-        const rewrapped = await exportAesKeyRaw(documentKey);
-        const wrapped = await aesEncrypt(shareSecretKey, rewrapped);
+      const docIds = Object.keys(selectedDocs);
+      if (docIds.length > 0) {
+        // One bulk query instead of one `document_key_wrappers` select per document.
+        const { data: wrappers } = await supabase.from("document_key_wrappers").select("*").in("document_id", docIds);
+        for (const docId of docIds) {
+          const mode = selectedDocs[docId];
+          const doc = docs.find((d) => d.id === docId);
+          const wrapper = wrappers?.find((w) => w.document_id === docId);
+          if (!doc || !wrapper) continue;
+          const documentKey = await unwrapKey(vault.rootKey, {
+            ciphertext: wrapper.wrapped_document_key,
+            iv: wrapper.wrapping_iv,
+          });
+          const rewrapped = await exportAesKeyRaw(documentKey);
+          const wrapped = await aesEncrypt(shareSecretKey, rewrapped);
 
-        if (mode === "sanitized" && doc.sanitized) {
-          items.push({ sanitizedArtifactId: doc.sanitized.id, wrappedAccessKey: wrapped.ciphertext, wrappingIv: wrapped.iv });
-        } else {
-          items.push({ documentId: doc.id, wrappedAccessKey: wrapped.ciphertext, wrappingIv: wrapped.iv });
+          if (mode === "sanitized" && doc.sanitized) {
+            items.push({ sanitizedArtifactId: doc.sanitized.id, wrappedAccessKey: wrapped.ciphertext, wrappingIv: wrapped.iv });
+          } else {
+            items.push({ documentId: doc.id, wrappedAccessKey: wrapped.ciphertext, wrappingIv: wrapped.iv });
+          }
         }
       }
 
-      for (const [datasetId, metrics] of Object.entries(selectedDatasets)) {
+      const datasetEntries = Object.entries(selectedDatasets);
+      const vitalsItems = await mapWithConcurrency(datasetEntries, VITALS_SHARE_CONCURRENCY, async ([datasetId, metrics]) => {
         const dataset = datasets.find((d) => d.id === datasetId);
-        if (!dataset) continue;
-        const datasetKey = await unwrapKey(vault.rootKey, {
-          ciphertext: dataset.wrapped_dataset_key,
-          iv: dataset.wrapping_iv,
-        });
-        const { data: blob } = await supabase.storage.from("encrypted-blobs").download(dataset.encrypted_payload_path);
+        if (!dataset) return null;
+
+        // Key unwrap (CPU) and blob download (network) are independent.
+        const [datasetKey, { data: blob }] = await Promise.all([
+          unwrapKey(vault.rootKey, { ciphertext: dataset.wrapped_dataset_key, iv: dataset.wrapping_iv }),
+          supabase.storage.from("encrypted-blobs").download(dataset.encrypted_payload_path),
+        ]);
         const bytes = new Uint8Array(await blob!.arrayBuffer());
-        const plainBuf = await aesDecrypt(datasetKey, { ciphertext: bufToBase64(bytes), iv: dataset.encryption_iv });
+        const plainBuf = await aesDecryptBytes(datasetKey, { ciphertext: bytes, iv: dataset.encryption_iv });
         const points: VitalsPoint[] = JSON.parse(bufToUtf8(plainBuf));
 
         const metricList = Array.from(metrics);
@@ -171,24 +187,26 @@ export function ShareWizard() {
         });
 
         const ephemeralKey = await generateAesKey();
-        const encrypted = await aesEncrypt(ephemeralKey, utf8ToBuf(JSON.stringify(filtered)));
+        const encrypted = await aesEncryptBytes(ephemeralKey, utf8ToBuf(JSON.stringify(filtered)));
         const path = `${user.id}/${uuidv4()}`;
         await supabase.storage
           .from("encrypted-blobs")
-          .upload(path, base64ToBuf(encrypted.ciphertext) as BlobPart, { contentType: "application/octet-stream" });
+          .upload(path, encrypted.ciphertext as BlobPart, { contentType: "application/octet-stream" });
 
         const ephemeralRaw = await exportAesKeyRaw(ephemeralKey);
         const wrapped = await aesEncrypt(shareSecretKey, ephemeralRaw);
 
-        items.push({
+        const item: ShareItemInput = {
           vitalsDatasetId: datasetId,
           selectedMetrics: metricList,
           wrappedAccessKey: wrapped.ciphertext,
           wrappingIv: wrapped.iv,
           encryptedStoragePath: path,
           encryptionIv: encrypted.iv,
-        });
-      }
+        };
+        return item;
+      });
+      for (const item of vitalsItems) if (item) items.push(item);
 
       if (items.length === 0) throw new Error("Select at least one document or vitals metric to share.");
 
